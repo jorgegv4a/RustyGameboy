@@ -1,7 +1,25 @@
+#![allow(non_camel_case_types)]
 const FLAGS_C_BIT: u8 = 4;
 const FLAGS_H_BIT: u8 = 5;
 const FLAGS_N_BIT: u8 = 6;
 const FLAGS_Z_BIT: u8 = 7;
+
+pub enum SingleRegister {
+    B = 0,
+    C = 1,
+    D = 2,
+    E = 3,
+    H = 4,
+    L = 5,
+    A = 7,
+}
+
+pub enum DoubleRegister {
+    BC = 0,
+    DE = 1,
+    HL = 2,
+    SP_or_AF = 3,
+}
 
 pub struct RegisterBank {
     pub A: u8,
@@ -121,5 +139,4 @@ impl RegisterBank {
     pub fn clear_Z(&mut self) {
         self.F |= (1 << FLAGS_Z_BIT) ^ 0xFF
     }
-
 }

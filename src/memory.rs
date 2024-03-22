@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 const GB_ROM_BANK_SIZE: usize = 16 * 1024;
 const GB_INTERNAL_RAM_SIZE: usize = 8 * 1024;
 const GB_VRAM_SIZE: usize = 8 * 1024;
@@ -69,5 +70,23 @@ impl AddressSpace {
         self.active_rom_bank.copy_from_slice(&rom_bytes[GB_ROM_BANK_SIZE..]);
         self.raw_game_rom = rom_bytes.clone();
         Ok(())
+    }
+
+    pub fn read(&self, index: u16) -> u8 {
+        let value = match index {
+            0..=0x3FFF => self.rom_bank[index as usize],
+            0x4000..=0x7FFF => self.active_rom_bank[index as usize - 0x4000],
+            0x8000..=0x9FFF => self.vram[index as usize - 0x8000],
+            0xA000..=0xBFFF => self.ram_bank[index as usize - 0xA000],
+            0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000],
+            0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000],
+            0xFE00..=0xFE9F => self.oam[index as usize - 0xFE00],
+            0xFEA0..=0xFEFF => self.empty_io[index as usize - 0xFEA0],
+            0xFF00..=0xFF4B => self.standard_io[index as usize - 0xFF00],
+            0xFF4C..=0xFF7F => self.empty_io2[index as usize - 0xFF4C],
+            0xFF80..=0xFFFE => self.hram[index as usize - 0xFF80],
+            0xFFFF => self.interrupt_enable[index as usize - 0xFFFF],
+        };
+        value
     }
 }

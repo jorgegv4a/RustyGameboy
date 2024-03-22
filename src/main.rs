@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 mod registers;
 mod cpu;
 mod memory;
@@ -36,4 +37,5 @@ fn main() {
     println!("elapsed: {}", t0.elapsed().as_micros());
     println!("CPU: {}", cpu);
     println!("rom data @ 1234: {}", cpu.memory.rom_bank[1234]);
+    println!("rom data read @ 1234: {}", cpu.memory.read(1234));
 }

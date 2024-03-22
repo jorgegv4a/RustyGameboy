@@ -1,3 +1,4 @@
+#![allow(non_camel_case_types)]
 use crate::registers::RegisterBank;
 use crate::memory::AddressSpace;
 
