@@ -82,6 +82,7 @@ impl CPU {
         loop {
             let opcode_byte = self.fetch();
             let (opcode_dict, opcode) = self.decode(opcode_byte);
+            self.execute(opcode, opcode_dict);
 
             if self.clock > 10e6 as u64 {
                 break;
@@ -106,6 +107,31 @@ impl CPU {
             println!("Extracting value from {}", format!("0x{:02x}", opcode_byte));
             let opcode_dict: Opcode = serde_json::from_value(self.opcodes["unprefixed"][format!("0x{:02x}", opcode_byte)].to_owned()).unwrap();
             (opcode_dict, opcode_byte as u16)
+        }
+    }
+
+    fn execute(&mut self, opcode: u16, opcode_dict: Opcode) {
+        let start_clock_t = self.clock - 4;
+        let code_length = match (opcode >> 8) & 0xFF {
+            0xCB => opcode_dict.length - 2,
+            _ => opcode_dict.length - 1,
+        };
+
+        let mut extra_bytes: Vec<u8> = Vec::new();
+        for _ in 0..code_length {
+            extra_bytes.push(self.fetch());
+        }
+
+        let remaining_cycles = opcode_dict.cycles[0] - ((self.clock - start_clock_t) as u8);
+
+        match opcode {
+            _ => panic!("Unimplemented opcode: {:#06X}", opcode)
+        }
+
+        self.tick(remaining_cycles);
+        if self.memory.read(0xFF02) == 0x81 {
+            print!("{}", std::char::from_u32(self.memory.read(0xFF01) as u32).unwrap_or('?'));
+            self.memory.write(0xFF02, 0);
         }
     }
 }

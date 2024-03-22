@@ -4,9 +4,9 @@ use std::fs;
 
 #[derive(Deserialize, Debug)]
 pub struct Opcode {
-    mnemonic: String,
-    length: u8,
-    cycles: Vec<u8>,
+    pub mnemonic: String,
+    pub length: u8,
+    pub cycles: Vec<u8>,
 
     #[serde(default)]
     operand1: Option<String>,
