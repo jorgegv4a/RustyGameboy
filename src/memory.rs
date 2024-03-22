@@ -1,0 +1,73 @@
+const GB_ROM_BANK_SIZE: usize = 16 * 1024;
+const GB_INTERNAL_RAM_SIZE: usize = 8 * 1024;
+const GB_VRAM_SIZE: usize = 8 * 1024;
+const OAM_SIZE: usize = 160;
+const CARTRIDGE_RAM_SIZE: usize = 8 * 1024;
+const CARTRIDGE_ROM_ONLY: usize = 0x00;
+const CARTRIDGE_MBC1: usize = 0x01;
+
+#[derive(PartialEq)]
+pub enum Cartridge {
+    RomOnly,
+    MBC1,
+}
+
+pub struct AddressSpace {
+    pub raw_game_rom: Vec<u8>,
+    pub rom_bank: [u8; GB_ROM_BANK_SIZE],
+    active_rom_bank: [u8; GB_ROM_BANK_SIZE],
+    vram: [u8; GB_VRAM_SIZE],
+    ram_bank: [u8; GB_INTERNAL_RAM_SIZE],
+    internal_ram: [u8; GB_INTERNAL_RAM_SIZE],
+    oam: [u8; OAM_SIZE],
+    empty_io: [u8; 96],
+    standard_io: [u8; 76],
+    empty_io2: [u8; 52],
+    hram: [u8; 127],
+    interrupt_enable: [u8; 1],
+    dma_start_address: i32,
+    dma_clock_t: u16,
+}
+
+impl AddressSpace {
+    pub fn new() -> AddressSpace {
+        AddressSpace {
+            raw_game_rom: Vec::new(),
+            rom_bank: [0; GB_ROM_BANK_SIZE],
+            active_rom_bank: [0; GB_ROM_BANK_SIZE],
+            vram: [0; GB_VRAM_SIZE],
+            ram_bank: [0; GB_INTERNAL_RAM_SIZE],
+            internal_ram: [0; GB_INTERNAL_RAM_SIZE],
+            oam: [0; OAM_SIZE],
+            empty_io: [0; 96],
+            standard_io: [0; 76],
+            empty_io2: [0; 52],
+            hram: [0; 127],
+            interrupt_enable: [0; 1],
+            dma_start_address: -1,
+            dma_clock_t: 0,
+        }
+    }
+
+    pub fn load_rom(&mut self, rom_bytes: Vec<u8>, cartridge_type: Cartridge) -> Result<(), String> {
+        if cartridge_type != Cartridge::RomOnly {
+            panic!("Only ROM only cartridges are supported");
+        }
+        match rom_bytes.len() {
+            x if x > 0x8000 => panic!("ROM size too large"),
+            x if x < 0x8000 => panic!("ROM size too small"),
+            _ => (),
+
+        }
+        // for i in 0..self.rom_bank.len() {
+        //     self.rom_bank[i] = rom_bytes[i];
+        // }
+        // for i in 0..self.active_rom_bank.len() {
+        //     self.active_rom_bank[i] = rom_bytes[self.rom_bank.len() + i];
+        // }
+        self.rom_bank.copy_from_slice(&rom_bytes[..GB_ROM_BANK_SIZE]);
+        self.active_rom_bank.copy_from_slice(&rom_bytes[GB_ROM_BANK_SIZE..]);
+        self.raw_game_rom = rom_bytes.clone();
+        Ok(())
+    }
+}

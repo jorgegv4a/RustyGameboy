@@ -1,8 +1,9 @@
-use std::{self, str::FromStr};
 use crate::registers::RegisterBank;
+use crate::memory::AddressSpace;
 
 pub struct CPU {
     pub registers: RegisterBank,
+    pub memory: AddressSpace,
 }
 
 
@@ -10,6 +11,7 @@ impl CPU {
     pub fn new() -> CPU {
         CPU {
             registers: RegisterBank::new(),
+            memory: AddressSpace::new(),
         }
     }
 }

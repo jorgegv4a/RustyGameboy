@@ -1,5 +1,6 @@
 mod registers;
 mod cpu;
+mod memory;
 
 use cpu::CPU;
 
@@ -7,6 +8,7 @@ use std::io::Read;
 use std::path::Path;
 use std::fs::File;
 use std::fs;
+use std::time::Instant;
 
 fn main() {
     let path = Path::new("/home/mojonero/Downloads/Tetris (JUE) (V1.0).gb");
@@ -27,6 +29,11 @@ fn main() {
     };
     println!("bytes: {}", buf[0]);
 
-    let cpu = CPU::new();
-    println!("CPU: {}", cpu)
+    let mut cpu = CPU::new();
+    println!("rom data @ 1234: {}", cpu.memory.rom_bank[1234]);
+    let t0 = Instant::now();
+    cpu.memory.load_rom(buf, memory::Cartridge::RomOnly);
+    println!("elapsed: {}", t0.elapsed().as_micros());
+    println!("CPU: {}", cpu);
+    println!("rom data @ 1234: {}", cpu.memory.rom_bank[1234]);
 }
