@@ -89,4 +89,27 @@ impl AddressSpace {
         };
         value
     }
+
+    pub fn write(&mut self, index: u16, value: u8) {
+        match index {
+            0..=0x7FFF => println!("Tried to write into {:02X} which is not writeable", index),
+            0x8000..=0x9FFF => self.vram[index as usize - 0x8000] = value,
+            0xA000..=0xBFFF => self.ram_bank[index as usize - 0xA000] = value,
+            0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000] = value,
+            0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000] = value,
+            0xFE00..=0xFE9F => self.oam[index as usize - 0xFE00] = value, // TODO: disable access except during H/V Blank
+            0xFEA0..=0xFEFF => self.empty_io[index as usize - 0xFEA0] = value,
+            idx @ 0xFF00..=0xFF4B => 
+            {
+                if idx == 0xFF46 {
+                    self.dma_start_address = 0x100 * value as i32
+                } else{
+                    self.standard_io[index as usize - 0xFF00] = value
+                }
+            }
+            0xFF4C..=0xFF7F => self.empty_io2[index as usize - 0xFF4C] = value,
+            0xFF80..=0xFFFE => self.hram[index as usize - 0xFF80] = value,
+            0xFFFF => self.interrupt_enable[index as usize - 0xFFFF] = value,
+        }
+    }
 }

@@ -31,11 +31,11 @@ fn main() {
     println!("bytes: {}", buf[0]);
 
     let mut cpu = CPU::new();
-    println!("rom data @ 1234: {}", cpu.memory.rom_bank[1234]);
     let t0 = Instant::now();
     cpu.memory.load_rom(buf, memory::Cartridge::RomOnly);
     println!("elapsed: {}", t0.elapsed().as_micros());
     println!("CPU: {}", cpu);
-    println!("rom data @ 1234: {}", cpu.memory.rom_bank[1234]);
-    println!("rom data read @ 1234: {}", cpu.memory.read(1234));
+    println!("rom data read @ 0x8123: {}", cpu.memory.read(0x8123));
+    cpu.memory.write(0x8123, 41);
+    println!("rom data read @ 0x8123: {}", cpu.memory.read(0x8123));
 }
