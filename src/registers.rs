@@ -70,6 +70,10 @@ impl RegisterBank {
         self.PC
     }
 
+    pub fn increment_PC(&mut self) {
+        self.PC = self.PC.wrapping_add(1);
+    }
+
     pub fn set_BC(&mut self, v: u16) {
         self.B = ((v & 0xFF00) >> 8) as u8;
         self.C = (v & 0xFF) as u8;

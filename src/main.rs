@@ -2,6 +2,7 @@
 mod registers;
 mod cpu;
 mod memory;
+mod opcodes;
 
 use cpu::CPU;
 
@@ -34,6 +35,7 @@ fn main() {
     let t0 = Instant::now();
     cpu.memory.load_rom(buf, memory::Cartridge::RomOnly);
     println!("elapsed: {}", t0.elapsed().as_micros());
+    cpu.run();
     println!("CPU: {}", cpu);
     println!("rom data read @ 0x8123: {}", cpu.memory.read(0x8123));
     cpu.memory.write(0x8123, 41);

@@ -112,4 +112,17 @@ impl AddressSpace {
             0xFFFF => self.interrupt_enable[index as usize - 0xFFFF] = value,
         }
     }
+
+    pub fn tick(&mut self) {
+        if self.dma_start_address < 0 {
+            return
+        }
+        let oam_index = (self.dma_clock_t / 4) as usize;
+        let mem_address = (self.dma_start_address as u16) + self.dma_clock_t / 4;
+        self.oam[oam_index] = self.read(mem_address);
+        if self.dma_clock_t >= 0xA0 {
+            self.dma_clock_t = 0;
+            self.dma_start_address = -1;
+        }
+    }
 }
