@@ -8,7 +8,7 @@ use serde_json::Value;
 
 const DEBUG: bool = true;
 
-
+#[derive(Debug)]
 enum SingleDataLoc {
     B,
     C,
@@ -18,24 +18,27 @@ enum SingleDataLoc {
     L,
     HL_addr,
     A,
+    n8(u8),
 }
 
-impl std::convert::From<u8> for SingleDataLoc {
-    fn from(value: u8) -> Self {
+impl std::convert::From<(u8, Option<u8>)> for SingleDataLoc {
+    fn from(value: (u8, Option<u8>)) -> Self {
         match value {
-            0 => Self::B,
-            1 => Self::C,
-            2 => Self::D,
-            3 => Self::E,
-            4 => Self::H,
-            5 => Self::L,
-            6 => Self::HL_addr,
-            7 => Self::A,
-            _ => panic!("Tried to convert {} to SingleDataLoc (range 0-7)", value),
+            (0, None) => Self::B,
+            (1, None) => Self::C,
+            (2, None) => Self::D,
+            (3, None) => Self::E,
+            (4, None) => Self::H,
+            (5, None) => Self::L,
+            (6, None) => Self::HL_addr,
+            (7, None) => Self::A,
+            (_, Some(x)) => Self::n8(x),
+            (idx, _) => panic!("Tried to convert {} to SingleDataLoc (range 0-7)", idx),
         }
     }
 }
 
+#[derive(Debug)]
 enum DoubleDataLoc {
     BC,
     DE,
@@ -179,14 +182,123 @@ impl CPU {
 
         let remaining_cycles = opcode_dict.cycles[0] - ((self.clock - start_clock_t) as u8);
 
-        if opcode == 0x0000 {
+        if opcode == 0x00 {
             if DEBUG {
                 println!("> NOP");
             }
-        } else if opcode == 0x00C3 {
+        } else if opcode == 0x10 {
+            if DEBUG {
+                println!("> STOP");
+            }
+        
+        // LOADS
+        } else if opcode == 0x08 {
+            //self._handle_load_from_SP_to_indirect_address(opcode, extra_bytes)
+
+        } else if (0x40 <= opcode && opcode < 0x80) && opcode != 0x76 {
+            //self._handle_no_param_loads(opcode)
+
+        } else if opcode & 0xC7 == 0x06 {
+            //self._handle_d8_loads(opcode, extra_bytes)
+
+        } else if opcode & 0xCF == 0x01 {
+            //self._handle_load_d16_to_r16(opcode, extra_bytes)
+
+        } else if opcode & 0xC7 == 0x02 {
+            //self._handle_indirect_loads(opcode)
+
+        } else if opcode & 0xFE == 0xF8 {
+            //self._handle_load_r16_to_r16(opcode, extra_bytes)
+
+        } else if opcode & 0xE5 == 0xE0 && opcode & 0xEF != 0xE8 {
+            //self._handle_misc_indirect_loads(opcode, extra_bytes)
+
+        // JUMPS
+        } else if opcode & 0xE7 == 0xC2 {
+            // branch = self._handle_jump_d16_cond(opcode, extra_bytes)
+            // if !branch {
+            //     remaining_cycles = opcode_dict["cycles"][1] - (self.clock - start_clock_t)
+            // }
+
+        } else if opcode == 0xC3 {
             self.handle_jump_absolute_d16(opcode, extra_bytes);
+
+        } else if opcode == 0xE9 {
+            // self._handle_jump_absolute_HL(opcode, extra_bytes)
+
+        } else if opcode & 0xE7 == 0x20 {
+            // branch = self._handle_jump_relative_cond(opcode, extra_bytes)
+            // if !branch {
+            //     remaining_cycles = opcode_dict["cycles"][1] - (self.clock - start_clock_t)
+            // }
+            
+        } else if opcode == 0x18 {
+            // self._handle_jump_relative(opcode, extra_bytes)
+
+        // ARITHMETIC/LOGIC
         } else if 0x80 <= opcode && opcode < 0xC0 {
-            self.handle_no_param_alu(opcode);
+            self.handle_u8_alu(opcode, Vec::new()); // r8
+
+        } else if opcode & 0xC7 == 0xC6 {
+            self.handle_u8_alu(opcode, extra_bytes); // n8
+
+        } else if opcode & 0xE7 == 0x27 {
+            //self.handle_accumulator_misc(opcode);
+            
+        } else if opcode & 0xC6 == 0x04 {
+            self.handle_inc_dec_r8(opcode);
+            
+        
+        } else if opcode & 0xC7 == 0x03 {
+            // self._handle_inc_dec_r16(opcode)
+
+        } else if opcode & 0xCF == 0x09 {
+            // self._handle_add_r16(opcode)
+
+        } else if opcode == 0xE8 {
+            // self._handle_add_SP_int8(opcode, extra_bytes)
+
+        } else if opcode & 0xCF == 0xC1 {
+            // self._handle_r16_pop(opcode)
+
+        } else if opcode & 0xCF == 0xC5 {
+            // self._handle_r16_push(opcode)
+
+        } else if opcode & 0xE7 == 0x07 {
+            // self._handle_rotate_accumulator(opcode)
+
+        // CALL/RESET/RETURN
+        } else if opcode & 0xE7 == 0xC4 {
+            // self._handle_call_cond(opcode, extra_bytes)
+
+        } else if opcode == 0xCD {
+            // self._handle_call_d16(opcode, extra_bytes)
+
+        } else if opcode & 0xC7 == 0xC7 {
+            // self._handle_reset_vector(opcode)
+
+        } else if opcode & 0xEF == 0xC9 {
+            // self._handle_return(opcode)
+        
+        } else if opcode & 0xE7 == 0xC0 {
+        // branch = self._handle_return_cond(opcode)
+        // if !branch {
+        //     remaining_cycles = opcode_dict["cycles"][1] - (self.clock - start_clock_t)
+        // }
+
+        // -- INTERRUPT CONTROL
+        } else if opcode == 0xF3 { // DI
+            // if DEBUG {
+            //     print(F"> DI")
+            // }
+            // self.IME = 0
+
+        } else if opcode == 0xFB { // EI
+            // if DEBUG {
+            //     print(f"> EI")
+            // }
+            // self.IME = 1 // TODO: should be done after the next cycle, not immediately
+        
         } else {
             panic!("Unimplemented opcode: {:#06X}", opcode);
         }
@@ -198,7 +310,7 @@ impl CPU {
         }
     }
 
-    fn read_single(&self, src: SingleDataLoc) -> u8 {
+    fn read_single(&self, src: &SingleDataLoc) -> u8 {
         match src {
             SingleDataLoc::A => self.registers.A,
             SingleDataLoc::B => self.registers.B,
@@ -208,10 +320,11 @@ impl CPU {
             SingleDataLoc::H => self.registers.H,
             SingleDataLoc::L => self.registers.L,
             SingleDataLoc::HL_addr => self.memory.read(self.registers.HL()),
+            SingleDataLoc::n8(x) => *x,
         }
     }
 
-    fn write_single(&mut self, dst: SingleDataLoc, value: u8) {
+    fn write_single(&mut self, dst: &SingleDataLoc, value: u8) {
         match dst {
             SingleDataLoc::A => self.registers.A = value,
             SingleDataLoc::B => self.registers.B = value,
@@ -221,10 +334,11 @@ impl CPU {
             SingleDataLoc::H => self.registers.H = value,
             SingleDataLoc::L => self.registers.L = value,
             SingleDataLoc::HL_addr => self.memory.write(self.registers.HL(), value),
+            SingleDataLoc::n8(_) => panic!("Cannot write to u8 immediate"),
         };
     }
 
-    fn read_double(&self, src: DoubleDataLoc) -> u16 {
+    fn read_double(&self, src: &DoubleDataLoc) -> u16 {
         match src {
             DoubleDataLoc::BC => self.registers.BC(),
             DoubleDataLoc::DE => self.registers.DE(),
@@ -234,7 +348,7 @@ impl CPU {
         }
     }
 
-    fn write_double(&mut self, dst: DoubleDataLoc, value: u16) {
+    fn write_double(&mut self, dst: &DoubleDataLoc, value: u16) {
         match dst {
             DoubleDataLoc::BC => self.registers.set_BC(value),
             DoubleDataLoc::DE => self.registers.set_DE(value),
@@ -247,7 +361,7 @@ impl CPU {
     fn handle_jump_absolute_d16(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
         let address = bytes_to_u16(extra_bytes);
         if DEBUG {
-            println!("> JO nn ({:04X})", address);
+            println!("> JP nn ({:04X})", address);
         }
         self.registers.write_PC(address);
     }
@@ -255,76 +369,143 @@ impl CPU {
     fn add_u8(&mut self, operand: u8) {
         let value_pre = self.registers.A;
         self.registers.A = self.registers.A.wrapping_add(operand);
-        if (value_pre & 0xF) + (operand & 0xF) > 0xF {
-            self.registers.set_flag_H();
-        } else {
-            self.registers.clear_flag_H();
-        }
+        self.registers.flag_C_from_bool((value_pre as u16) + (operand as u16) > 0xFF);
+        self.registers.flag_H_from_bool((value_pre & 0xF) + (operand & 0xF) > 0xF);
+        self.registers.clear_flag_N();
+        self.registers.flag_Z_from_bool(self.registers.A == 0);
 
-        if self.registers.A == 0 {
-            self.registers.set_flag_Z();
-        } else {
-            self.registers.clear_flag_Z();
-        }
-
-        if (value_pre as u16) + (operand as u16) > 0xFF {
-            self.registers.set_flag_H();
-        } else {
-            self.registers.clear_flag_H();
-        }
-        self.registers.clear_flag_H();
     }
 
-    fn handle_no_param_alu(&mut self, opcode: u16) {
-        let src_reg_i = opcode as u8 & 0x7;
-        let srg_reg = SingleDataLoc::from(src_reg_i);
-        let operand_value = self.read_single(srg_reg);
-        let operand_repr = "n";
+    fn subtract_u8(&mut self, operand: u8) {
+        let value_pre = self.registers.A;
+        self.registers.A = self.registers.A.wrapping_sub(operand);
+        self.registers.flag_C_from_bool(value_pre < operand);
+        self.registers.flag_H_from_bool((value_pre & 0xF) < (operand & 0xF));
+        self.registers.set_flag_N();
+        self.registers.flag_Z_from_bool(self.registers.A == 0);
+    }
+
+    fn and_u8(&mut self, operand: u8) {
+        self.registers.A &= operand;
+        self.registers.clear_flag_C();
+        self.registers.set_flag_H();
+        self.registers.clear_flag_N();
+        self.registers.flag_Z_from_bool(self.registers.A == 0);
+    }
+
+    fn xor_u8(&mut self, operand: u8) {
+        self.registers.A ^= operand;
+        self.registers.clear_flag_C();
+        self.registers.clear_flag_H();
+        self.registers.clear_flag_N();
+        self.registers.flag_Z_from_bool(self.registers.A == 0);
+    }
+
+    fn or_u8(&mut self, operand: u8) {
+        self.registers.A |= operand;
+        self.registers.clear_flag_C();
+        self.registers.clear_flag_H();
+        self.registers.clear_flag_N();
+        self.registers.flag_Z_from_bool(self.registers.A == 0);
+    }
+
+    fn compare_u8(&mut self, operand: u8) {
+        let value_pre = self.registers.A;
+        let output = self.registers.A.wrapping_sub(operand);
+        self.registers.flag_C_from_bool(value_pre < operand);
+        self.registers.flag_H_from_bool((value_pre & 0xF) < (operand & 0xF));
+        self.registers.set_flag_N();
+        self.registers.flag_Z_from_bool(output == 0);
+    }
+
+    fn handle_u8_alu(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
+        let srg_reg: SingleDataLoc;
+        if extra_bytes.len() == 0 {
+            let src_reg_i = opcode as u8 & 0x7;
+            srg_reg = SingleDataLoc::from((src_reg_i, None));
+        } else {
+            let immediate = extra_bytes[0];
+            srg_reg = SingleDataLoc::from((0, Some(immediate)));
+        }
+        let operand_value = self.read_single(&srg_reg);
 
         if (opcode >> 3) & 0x7 == 0 {
             if DEBUG {
-                println!("> ADD {operand_repr} ({operand_value:02X})");
+                println!("> ADD {srg_reg:?} ({operand_value:02X})");
             }
             self.add_u8(operand_value);
-            todo!("ADD");
+
         } else if (opcode >> 3) & 0x7 == 0x1 {
             if DEBUG {
-                println!("> ADC {operand_repr} ({operand_value:02X})");
+                println!("> ADC {srg_reg:?} ({operand_value:02X})");
             }
-            todo!("ADC");
+            if self.registers.read_flag_C() {
+                self.add_u8(operand_value.wrapping_add(1));
+            } else {
+                self.add_u8(operand_value);
+            }
         } else if (opcode >> 3) & 0x7 == 0x2 {
             if DEBUG {
-                println!("> SUB {operand_repr} ({operand_value:02X})");
+                println!("> SUB {srg_reg:?} ({operand_value:02X})");
             }
-            todo!("SUB");
+            self.subtract_u8(operand_value);
+
         } else if (opcode >> 3) & 0x7 == 0x3 {
             if DEBUG {
-                println!("> SBC {operand_repr} ({operand_value:02X})");
+                println!("> SBC {srg_reg:?} ({operand_value:02X})");
             }
-            todo!("SBC");
+            if self.registers.read_flag_C() {
+                self.subtract_u8(operand_value.wrapping_add(1));
+            } else {
+                self.subtract_u8(operand_value);
+            }
+
         } else if (opcode >> 3) & 0x7 == 0x4 {
             if DEBUG {
-                println!("> AND {operand_repr} ({operand_value:02X})");
+                println!("> AND {srg_reg:?} ({operand_value:02X})");
             }
-            todo!("AND");
+            self.and_u8(operand_value)
         } else if (opcode >> 3) & 0x7 == 0x5 {
             if DEBUG {
-                println!("> XOR {operand_repr} ({operand_value:02X})");
+                println!("> XOR {srg_reg:?} ({operand_value:02X})");
             }
-            todo!("XOR");
+            self.xor_u8(operand_value)
         } else if (opcode >> 3) & 0x7 == 0x6 {
             if DEBUG {
-                println!("> OR {operand_repr} ({operand_value:02X})");
+                println!("> OR {srg_reg:?} ({operand_value:02X})");
             }
-            todo!("OR");
+            self.or_u8(operand_value)
         } else if (opcode >> 3) & 0x7 == 0x7 {
             if DEBUG {
-                println!("> CP {operand_repr} ({operand_value:02X})");
+                println!("> CP {srg_reg:?} ({operand_value:02X})");
             }
-            todo!("CP");
+            self.compare_u8(operand_value)
         } else {
             panic!("Unexpected opcode {opcode:02X}, expected generic ALU instruction!");
         }
+    }
+
+    fn handle_inc_dec_r8(&mut self, opcode: u16) {
+        let src_reg_i = opcode as u8 & 0x7;
+        let src_reg: SingleDataLoc = SingleDataLoc::from((src_reg_i, None));
+        let operand_value = self.read_single(&src_reg);
+        let increment_op = opcode & 1 == 0;
+        let new_value: u8;
+        let overflow: bool;
+
+        if increment_op {
+            (new_value, overflow) = operand_value.overflowing_add(1);
+            self.write_single(&src_reg, new_value);
+            self.registers.flag_H_from_bool((operand_value & 0xF) == 0xF);
+        } else {
+            (new_value, overflow) = operand_value.overflowing_add(1);
+            self.write_single(&src_reg, new_value);
+            self.registers.flag_H_from_bool((operand_value & 0xF) == 0);
+        }
+        self.registers.flag_C_from_bool(overflow);
+        self.registers.flag_N_from_bool(!increment_op);
+        self.registers.flag_Z_from_bool(new_value == 0);
+        self.write_single(&src_reg, new_value)
     }
 }
 

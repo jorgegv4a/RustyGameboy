@@ -126,4 +126,36 @@ impl RegisterBank {
     pub fn clear_flag_Z(&mut self) {
         self.F |= (1 << FLAGS_Z_BIT) ^ 0xFF
     }
+
+    pub fn flag_C_from_bool(&mut self, value: bool) {
+        if value {
+            self.set_flag_C();
+        } else {
+            self.clear_flag_C();
+        }
+    }
+
+    pub fn flag_H_from_bool(&mut self, value: bool) {
+        if value {
+            self.set_flag_H();
+        } else {
+            self.clear_flag_H();
+        }
+    }
+
+    pub fn flag_N_from_bool(&mut self, value: bool) {
+        if value {
+            self.set_flag_N();
+        } else {
+            self.clear_flag_N();
+        }
+    }
+
+    pub fn flag_Z_from_bool(&mut self, value: bool) {
+        if value {
+            self.set_flag_Z();
+        } else {
+            self.clear_flag_Z();
+        }
+    }
 }
