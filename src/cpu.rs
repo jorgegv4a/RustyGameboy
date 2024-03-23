@@ -6,12 +6,66 @@ use crate::memory::AddressSpace;
 use crate::opcodes::{get_opcodes, Opcode};
 use serde_json::Value;
 
+const DEBUG: bool = true;
+
+
+enum SingleDataLoc {
+    B,
+    C,
+    D,
+    E,
+    H,
+    L,
+    HL_addr,
+    A,
+}
+
+impl std::convert::From<u8> for SingleDataLoc {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::B,
+            1 => Self::C,
+            2 => Self::D,
+            3 => Self::E,
+            4 => Self::H,
+            5 => Self::L,
+            6 => Self::HL_addr,
+            7 => Self::A,
+            _ => panic!("Tried to convert {} to SingleDataLoc (range 0-7)", value),
+        }
+    }
+}
+
+enum DoubleDataLoc {
+    BC,
+    DE,
+    HL,
+    AF,
+    SP,
+}
+
+impl std::convert::From<u8> for DoubleDataLoc {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::BC,
+            1 => Self::DE,
+            2 => Self::HL,
+            3 => Self::AF,
+            _ => Self::SP,
+        }
+    }
+}
+
 pub struct CPU {
     pub registers: RegisterBank,
     pub memory: AddressSpace,
     master_interrupt_enable: bool,
     clock: u64,
     opcodes: Value,
+}
+
+fn bytes_to_u16(extra_bytes: Vec<u8>) -> u16 {
+    ((extra_bytes[1] as u16) << 8) | (extra_bytes[0] as u16)
 }
 
 
@@ -80,6 +134,7 @@ impl CPU {
     pub fn run(&mut self) {
         self.boot();
         loop {
+            println!("{}", self);
             let opcode_byte = self.fetch();
             let (opcode_dict, opcode) = self.decode(opcode_byte);
             self.execute(opcode, opcode_dict);
@@ -124,14 +179,127 @@ impl CPU {
 
         let remaining_cycles = opcode_dict.cycles[0] - ((self.clock - start_clock_t) as u8);
 
-        match opcode {
-            _ => panic!("Unimplemented opcode: {:#06X}", opcode)
+        if opcode == 0x0000 {
+            if DEBUG {
+                println!("> NOP");
+            }
+        } else if opcode == 0x00C3 {
+            self.handle_jump_absolute_d16(opcode, extra_bytes);
+        } else if 0x80 <= opcode && opcode < 0xC0 {
+            self.handle_no_param_alu(opcode);
+        } else {
+            panic!("Unimplemented opcode: {:#06X}", opcode);
         }
 
         self.tick(remaining_cycles);
         if self.memory.read(0xFF02) == 0x81 {
             print!("{}", std::char::from_u32(self.memory.read(0xFF01) as u32).unwrap_or('?'));
             self.memory.write(0xFF02, 0);
+        }
+    }
+
+    fn read_single(&self, src: SingleDataLoc) -> u8 {
+        match src {
+            SingleDataLoc::A => self.registers.A,
+            SingleDataLoc::B => self.registers.B,
+            SingleDataLoc::C => self.registers.C,
+            SingleDataLoc::D => self.registers.D,
+            SingleDataLoc::E => self.registers.E,
+            SingleDataLoc::H => self.registers.H,
+            SingleDataLoc::L => self.registers.L,
+            SingleDataLoc::HL_addr => self.memory.read(self.registers.HL()),
+        }
+    }
+
+    fn write_single(&mut self, dst: SingleDataLoc, value: u8) {
+        match dst {
+            SingleDataLoc::A => self.registers.A = value,
+            SingleDataLoc::B => self.registers.B = value,
+            SingleDataLoc::C => self.registers.C = value,
+            SingleDataLoc::D => self.registers.D = value,
+            SingleDataLoc::E => self.registers.E = value,
+            SingleDataLoc::H => self.registers.H = value,
+            SingleDataLoc::L => self.registers.L = value,
+            SingleDataLoc::HL_addr => self.memory.write(self.registers.HL(), value),
+        };
+    }
+
+    fn read_double(&self, src: DoubleDataLoc) -> u16 {
+        match src {
+            DoubleDataLoc::BC => self.registers.BC(),
+            DoubleDataLoc::DE => self.registers.DE(),
+            DoubleDataLoc::HL => self.registers.HL(),
+            DoubleDataLoc::AF => self.registers.AF(),
+            DoubleDataLoc::SP => self.registers.SP,
+        }
+    }
+
+    fn write_double(&mut self, dst: DoubleDataLoc, value: u16) {
+        match dst {
+            DoubleDataLoc::BC => self.registers.set_BC(value),
+            DoubleDataLoc::DE => self.registers.set_DE(value),
+            DoubleDataLoc::HL => self.registers.set_HL(value),
+            DoubleDataLoc::AF => self.registers.set_AF(value),
+            DoubleDataLoc::SP => self.registers.SP = value,
+        };
+    }
+
+    fn handle_jump_absolute_d16(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
+        let address = bytes_to_u16(extra_bytes);
+        if DEBUG {
+            println!("> JO nn ({:04X})", address);
+        }
+        self.registers.write_PC(address);
+    }
+
+    fn handle_no_param_alu(&mut self, opcode: u16) {
+        let src_reg_i = opcode as u8 & 0x7;
+        let srg_reg = SingleDataLoc::from(src_reg_i);
+        let operand_value = self.read_single(srg_reg);
+        let operand_repr = "n";
+
+        if (opcode >> 3) & 0x7 == 0 {
+            if DEBUG {
+                println!("> ADD {operand_repr} ({operand_value:02X})");
+            }
+            todo!("ADD");
+        } else if (opcode >> 3) & 0x7 == 0x1 {
+            if DEBUG {
+                println!("> ADC {operand_repr} ({operand_value:02X})");
+            }
+            todo!("ADC");
+        } else if (opcode >> 3) & 0x7 == 0x2 {
+            if DEBUG {
+                println!("> SUB {operand_repr} ({operand_value:02X})");
+            }
+            todo!("SUB");
+        } else if (opcode >> 3) & 0x7 == 0x3 {
+            if DEBUG {
+                println!("> SBC {operand_repr} ({operand_value:02X})");
+            }
+            todo!("SBC");
+        } else if (opcode >> 3) & 0x7 == 0x4 {
+            if DEBUG {
+                println!("> AND {operand_repr} ({operand_value:02X})");
+            }
+            todo!("AND");
+        } else if (opcode >> 3) & 0x7 == 0x5 {
+            if DEBUG {
+                println!("> XOR {operand_repr} ({operand_value:02X})");
+            }
+            todo!("XOR");
+        } else if (opcode >> 3) & 0x7 == 0x6 {
+            if DEBUG {
+                println!("> OR {operand_repr} ({operand_value:02X})");
+            }
+            todo!("OR");
+        } else if (opcode >> 3) & 0x7 == 0x7 {
+            if DEBUG {
+                println!("> CP {operand_repr} ({operand_value:02X})");
+            }
+            todo!("CP");
+        } else {
+            panic!("Unexpected opcode {opcode:02X}, expected generic ALU instruction!");
         }
     }
 }
@@ -151,6 +319,9 @@ impl std::fmt::Display for CPU {
         if self.registers.read_C() {
             flags[3] = 'C';
         }
-        write!(f, "AF: {:02X}, BC: {:02X}, DE: {:02X}, HL: {:02X}, SP: {:02X}, PC: {:02X}, F: {}", self.registers.AF(), self.registers.BC(), self.registers.DE(), self.registers.HL(), self.registers.SP, self.registers.PC(), String::from_iter(flags))
+        write!(f, "AF: {:02X}, BC: {:02X}, DE: {:02X}, HL: {:02X}, SP: {:02X}, PC: {:02X}, F: {} | IME: {} | T: {} | LCDC: {:#04X} | STAT: {:#04X} | LY {:#04X}", 
+         self.registers.AF(), self.registers.BC(), self.registers.DE(), self.registers.HL(), 
+         self.registers.SP, self.registers.PC(), String::from_iter(flags), self.master_interrupt_enable, 
+         self.clock, self.memory.read(0xFF40), self.memory.read(0xFF41), self.memory.read(0xFF44))
     }
 }
