@@ -252,6 +252,29 @@ impl CPU {
         self.registers.write_PC(address);
     }
 
+    fn add_u8(&mut self, operand: u8) {
+        let value_pre = self.registers.A;
+        self.registers.A = self.registers.A.wrapping_add(operand);
+        if (value_pre & 0xF) + (operand & 0xF) > 0xF {
+            self.registers.set_flag_H();
+        } else {
+            self.registers.clear_flag_H();
+        }
+
+        if self.registers.A == 0 {
+            self.registers.set_flag_Z();
+        } else {
+            self.registers.clear_flag_Z();
+        }
+
+        if (value_pre as u16) + (operand as u16) > 0xFF {
+            self.registers.set_flag_H();
+        } else {
+            self.registers.clear_flag_H();
+        }
+        self.registers.clear_flag_H();
+    }
+
     fn handle_no_param_alu(&mut self, opcode: u16) {
         let src_reg_i = opcode as u8 & 0x7;
         let srg_reg = SingleDataLoc::from(src_reg_i);
@@ -262,6 +285,7 @@ impl CPU {
             if DEBUG {
                 println!("> ADD {operand_repr} ({operand_value:02X})");
             }
+            self.add_u8(operand_value);
             todo!("ADD");
         } else if (opcode >> 3) & 0x7 == 0x1 {
             if DEBUG {
@@ -307,16 +331,16 @@ impl CPU {
 impl std::fmt::Display for CPU {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut flags = ['-', '-', '-', '-'];
-        if self.registers.read_Z() {
+        if self.registers.read_flag_Z() {
             flags[0] = 'Z';
         }
-        if self.registers.read_N() {
+        if self.registers.read_flag_N() {
             flags[1] = 'N';
         }
-        if self.registers.read_H() {
+        if self.registers.read_flag_H() {
             flags[2] = 'H';
         }
-        if self.registers.read_C() {
+        if self.registers.read_flag_C() {
             flags[3] = 'C';
         }
         write!(f, "AF: {:02X}, BC: {:02X}, DE: {:02X}, HL: {:02X}, SP: {:02X}, PC: {:02X}, F: {} | IME: {} | T: {} | LCDC: {:#04X} | STAT: {:#04X} | LY {:#04X}", 

@@ -79,51 +79,51 @@ impl RegisterBank {
         self.PC = v
     }
 
-    pub fn read_C(&self) -> bool {
+    pub fn read_flag_C(&self) -> bool {
         ((self.F >> FLAGS_C_BIT) & 1) == 1
     }
 
-    pub fn read_H(&self) -> bool {
+    pub fn read_flag_H(&self) -> bool {
         ((self.F >> FLAGS_H_BIT) & 1) == 1
     }
 
-    pub fn read_N(&self) -> bool {
+    pub fn read_flag_N(&self) -> bool {
         ((self.F >> FLAGS_N_BIT) & 1) == 1
     }
 
-    pub fn read_Z(&self) -> bool {
+    pub fn read_flag_Z(&self) -> bool {
         ((self.F >> FLAGS_Z_BIT) & 1) == 1
     }
 
-    pub fn set_C(&mut self) {
+    pub fn set_flag_C(&mut self) {
         self.F |= 1 << FLAGS_C_BIT
     }
 
-    pub fn set_H(&mut self) {
+    pub fn set_flag_H(&mut self) {
         self.F |= 1 << FLAGS_H_BIT
     }
 
-    pub fn set_N(&mut self) {
+    pub fn set_flag_N(&mut self) {
         self.F |= 1 << FLAGS_N_BIT
     }
 
-    pub fn set_Z(&mut self) {
+    pub fn set_flag_Z(&mut self) {
         self.F |= 1 << FLAGS_Z_BIT
     }
 
-    pub fn clear_C(&mut self) {
+    pub fn clear_flag_C(&mut self) {
         self.F &= (1 << FLAGS_C_BIT) ^ 0xFF
     }
 
-    pub fn clear_H(&mut self) {
+    pub fn clear_flag_H(&mut self) {
         self.F |= (1 << FLAGS_H_BIT) ^ 0xFF
     }
 
-    pub fn clear_N(&mut self) {
+    pub fn clear_flag_N(&mut self) {
         self.F |= (1 << FLAGS_N_BIT) ^ 0xFF
     }
 
-    pub fn clear_Z(&mut self) {
+    pub fn clear_flag_Z(&mut self) {
         self.F |= (1 << FLAGS_Z_BIT) ^ 0xFF
     }
 }
