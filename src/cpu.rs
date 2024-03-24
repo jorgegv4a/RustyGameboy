@@ -6,8 +6,8 @@ use crate::memory::AddressSpace;
 use crate::opcodes::{get_opcodes, Opcode};
 use serde_json::Value;
 
-// const DEBUG: bool = false;
-const DEBUG: bool = true;
+const DEBUG: bool = false;
+// const DEBUG: bool = true;
 
 #[derive(Debug)]
 enum SingleDataLoc {
@@ -253,7 +253,6 @@ impl CPU {
 
             } else if opcode & 0xE7 == 0x27 {
                 self.handle_accumulator_misc(opcode);
-                todo!("not done");
                 
             } else if opcode & 0xC6 == 0x04 {
                 self.handle_inc_dec_r8(opcode);
@@ -330,7 +329,7 @@ impl CPU {
 
         self.tick(remaining_cycles);
         if self.memory.read(0xFF02) == 0x81 {
-            // print!("{}", std::char::from_u32(self.memory.read(0xFF01) as u32).unwrap_or('?'));
+            print!("{}", std::char::from_u32(self.memory.read(0xFF01) as u32).unwrap_or('?'));
             self.memory.write(0xFF02, 0);
         }
     }
@@ -430,7 +429,7 @@ impl CPU {
         };
         let immediate = byte_to_i16(extra_bytes[0]);
         if DEBUG {
-            println!("> JP {cond_repr}, e ({immediate:02X})");
+            println!("> JR {cond_repr}, e ({immediate:02X})");
         }
         if !condition {
             return false;
@@ -443,7 +442,7 @@ impl CPU {
     fn handle_jump_relative(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
         let immediate = byte_to_i16(extra_bytes[0]);
         if DEBUG {
-            println!("> JP e ({immediate:02X})");
+            println!("> JR e ({immediate:02X})");
         }
         let address = self.registers.PC().wrapping_add(immediate);
         self.registers.write_PC(address);
@@ -453,7 +452,7 @@ impl CPU {
         let value_pre = self.registers.A;
         self.registers.A = value_pre.wrapping_add(operand);
         if with_carry {
-            self.registers.A = value_pre.wrapping_add(1);
+            self.registers.A = self.registers.A.wrapping_add(1);
         }
         self.registers.flag_C_from_bool((value_pre as u16) + (operand as u16) + (with_carry as u16) > 0xFF);
         self.registers.flag_H_from_bool((value_pre & 0xF) + (operand & 0xF) + (with_carry as u8) > 0xF);
@@ -465,7 +464,7 @@ impl CPU {
         let value_pre = self.registers.A;
         self.registers.A = value_pre.wrapping_sub(operand);
         if with_carry {
-            self.registers.A = value_pre.wrapping_add(1);
+            self.registers.A = self.registers.A.wrapping_sub(1);
         }
         self.registers.flag_C_from_bool((value_pre as u16) < (operand as u16) + (with_carry as u16));
         self.registers.flag_H_from_bool((value_pre & 0xF) < (operand & 0xF) + (with_carry as u8));
@@ -750,7 +749,9 @@ impl CPU {
     fn handle_load_r16_to_r16(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
         if opcode & 1 == 0 {
             let immediate = byte_to_i16(extra_bytes[0]);
-            println!("> LD HL, SP+e ({immediate:02X})");
+            if DEBUG {
+                println!("> LD HL, SP+e ({immediate:02X})");
+            }
             let value_pre = self.registers.SP;
             let (result, overflow) = self.registers.SP.overflowing_add(immediate);
             self.write_double(&DoubleDataLoc::HL, result);
@@ -1149,6 +1150,7 @@ impl CPU {
         } else {
             if self.registers.read_flag_C() || self.registers.A > 0x99 {
                 output_value = output_value.wrapping_add(0x60);
+                self.registers.set_flag_C();
             }
             if self.registers.read_flag_H() || (self.registers.A & 0x0F) > 0x09 {
                 output_value = output_value.wrapping_add(0x06);
