@@ -116,15 +116,15 @@ impl RegisterBank {
     }
 
     pub fn clear_flag_H(&mut self) {
-        self.F |= (1 << FLAGS_H_BIT) ^ 0xFF
+        self.F &= (1 << FLAGS_H_BIT) ^ 0xFF
     }
 
     pub fn clear_flag_N(&mut self) {
-        self.F |= (1 << FLAGS_N_BIT) ^ 0xFF
+        self.F &= (1 << FLAGS_N_BIT) ^ 0xFF
     }
 
     pub fn clear_flag_Z(&mut self) {
-        self.F |= (1 << FLAGS_Z_BIT) ^ 0xFF
+        self.F &= (1 << FLAGS_Z_BIT) ^ 0xFF
     }
 
     pub fn flag_C_from_bool(&mut self, value: bool) {
