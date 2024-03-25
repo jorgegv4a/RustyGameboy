@@ -329,7 +329,9 @@ impl CPU {
 
         self.tick(remaining_cycles);
         if self.memory.read(0xFF02) == 0x81 {
-            print!("{}", std::char::from_u32(self.memory.read(0xFF01) as u32).unwrap_or('?'));
+            if !DEBUG {
+                print!("{}", std::char::from_u32(self.memory.read(0xFF01) as u32).unwrap_or('?'));
+            }
             self.memory.write(0xFF02, 0);
         }
     }
@@ -646,8 +648,8 @@ impl CPU {
         let value_pre = self.registers.SP;
         let (new_value, overflow) = self.registers.SP.overflowing_add(immediate);
         self.write_double(&DoubleDataLoc::SP, new_value);
-        self.registers.flag_C_from_bool(overflow);
         self.registers.flag_H_from_bool((value_pre & 0xF) + (immediate & 0xF) > 0xF);
+        self.registers.flag_C_from_bool((value_pre & 0xFF) + (immediate & 0xFF) > 0xFF);
         self.registers.clear_flag_Z();
         self.registers.clear_flag_N();
     }
@@ -657,8 +659,8 @@ impl CPU {
         if DEBUG {
             println!("> LD (a16), SP ({immediate:04X})")
         }
-        self.memory.write(immediate, (self.registers.PC() & 0xFF) as u8);
-        self.memory.write(immediate + 1, ((self.registers.PC() >> 8) & 0xFF) as u8);
+        self.memory.write(immediate, (self.registers.SP & 0xFF) as u8);
+        self.memory.write(immediate + 1, ((self.registers.SP >> 8) & 0xFF) as u8);
     }
 
     fn handle_no_param_loads(&mut self, opcode: u16) {
@@ -755,10 +757,15 @@ impl CPU {
             let value_pre = self.registers.SP;
             let (result, overflow) = self.registers.SP.overflowing_add(immediate);
             self.write_double(&DoubleDataLoc::HL, result);
-            self.registers.flag_C_from_bool(overflow);
+            self.registers.flag_C_from_bool((value_pre & 0xFF) + (immediate & 0xFF) > 0xFF);
             self.registers.flag_H_from_bool((value_pre & 0xF) + (immediate & 0xF) > 0xF);
             self.registers.clear_flag_Z();
             self.registers.clear_flag_N();
+        } else {
+            if DEBUG {
+                println!("> LD SP, HL");
+            }
+            self.registers.SP = self.registers.HL();
         }
     }
 
