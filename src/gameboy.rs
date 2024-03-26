@@ -9,15 +9,17 @@ use crate::graphics::PPU;
 pub struct Gameboy {
     cpu: CPU,
     memory: AddressSpace,
-    // ppu: PPU,
+    ppu: PPU,
 }
 
 impl Gameboy {
     pub fn new() -> Gameboy {
+        let sdl_context = sdl2::init().unwrap();
+        let video_subsystem = sdl_context.video().unwrap();
         Gameboy {
             cpu: CPU::new(),
             memory: AddressSpace::new(),
-            // ppu: PPU::new(),
+            ppu: PPU::new(video_subsystem),
         }
     }
 
@@ -46,6 +48,7 @@ impl Gameboy {
 
             self.cpu.tick(nticks);
             self.memory.tick(nticks);
+            self.ppu.tick(nticks, &mut self.memory);
             if self.memory.read(0xFF02) == 0x81 {
                 if !DEBUG {
                     print!("{}", std::char::from_u32(self.memory.read(0xFF01) as u32).unwrap_or('?'));
