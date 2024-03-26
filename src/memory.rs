@@ -110,7 +110,7 @@ impl AddressSpace {
         };
     }
 
-    pub fn tick(&mut self) {
+    fn single_tick(&mut self) {
         if self.dma_start_address < 0 {
             return
         }
@@ -120,6 +120,12 @@ impl AddressSpace {
         if self.dma_clock_t >= 0xA0 {
             self.dma_clock_t = 0;
             self.dma_start_address = -1;
+        }
+    }
+
+    pub fn tick(&mut self, nticks: u8) {
+        for i in 0..nticks {
+            self.single_tick();
         }
     }
 }
