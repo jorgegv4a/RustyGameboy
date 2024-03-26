@@ -24,3 +24,13 @@ pub const SCX_ADDR: u16 = 0xFF43;
 pub const SCY_ADDR: u16 = 0xFF42;
 pub const WX_ADDR: u16 = 0xFF4A;
 pub const WY_ADDR: u16 = 0xFF4B;
+
+pub const LCDY_ADDR: u16 = 0xFF44;
+pub const STAT_ADDR: u16 = 0xFF41;
+pub const LYC_ADDR: u16 = 0xFF45;
+
+pub const SB_ADDR: u16 = 0xFF01;
+pub const SC_ADDR: u16 = 0xFF02;
+
+pub const IF_ADDR: u16 = 0xFF0F;
+pub const IE_ADDR: u16 = 0xFFFF;

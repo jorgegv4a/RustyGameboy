@@ -65,7 +65,7 @@ impl std::convert::From<(u8, Option<u16>)> for DoubleDataLoc {
 pub struct CPU {
     pub registers: RegisterBank,
     // pub memory: AddressSpace,
-    master_interrupt_enable: bool,
+    pub master_interrupt_enable: bool,
     clock: u64,
     opcodes: Value,
 }
@@ -831,7 +831,7 @@ impl CPU {
         self.write_double(&src_reg, value);
     }
 
-    fn push_stack(&mut self, value: u16, memory: &mut AddressSpace) {
+    pub fn push_stack(&mut self, value: u16, memory: &mut AddressSpace) {
         let mut sp = self.read_double(&DoubleDataLoc::SP);
         sp = sp.wrapping_sub(1);
         self.write_double(&DoubleDataLoc::SP, sp);

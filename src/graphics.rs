@@ -15,6 +15,7 @@ use sdl2::rect::Point;
 use rand::prelude::*;
 
 use crate::constants::*;
+use crate::interrupt::Interrupt;
 use crate::memory::AddressSpace;
 
 #[derive(Debug)]
@@ -111,16 +112,29 @@ impl PPU {
         // println!("PPU, dot: {}, ly: {}, mode: {:?}", self.dot, self.ly, self.mode);
         match self.mode {
             PPUMode::OAMScan => {
-                if self.dot == 80 { self.mode = PPUMode::Drawing }
+                if self.dot == 80 {
+                    self.mode = PPUMode::Drawing;
+                    memory.request_interrupt(Interrupt::LCD);
+                }
             },
             PPUMode::Drawing => {
-                if self.dot == 80 + 172 { self.mode = PPUMode::HBlank }
+                if self.dot == 80 + 172 { 
+                    self.mode = PPUMode::HBlank;
+                    memory.request_interrupt(Interrupt::LCD);
+                }
             },
             PPUMode::HBlank => {
                 if self.dot == 456 { 
                     self.dot = 0; 
                     self.ly += 1; 
-                    if self.ly >= 144 { self.mode = PPUMode::VBlank } else { self.mode = PPUMode::OAMScan };
+                    if self.ly >= 144 { 
+                        self.mode = PPUMode::VBlank;
+                        memory.request_interrupt(Interrupt::VBlank);
+                        memory.request_interrupt(Interrupt::LCD);
+                    } else { 
+                        self.mode = PPUMode::OAMScan;
+                        memory.request_interrupt(Interrupt::LCD);
+                    };
                 }
             },
             PPUMode::VBlank => {
@@ -128,7 +142,11 @@ impl PPU {
                     self.dot = 0; 
                     self.ly += 1; 
                 }
-                if self.ly == 154 { self.ly = 0; self.mode = PPUMode::OAMScan };
+                if self.ly == 154 { 
+                    self.ly = 0; 
+                    self.mode = PPUMode::OAMScan;
+                    memory.request_interrupt(Interrupt::LCD);
+                };
             },
         };
         self.dot += 1;
@@ -140,16 +158,22 @@ impl PPU {
     }
 
     fn set_ly(&self, memory: &mut AddressSpace) {
-        memory.write(0xFF44, self.ly);
-        let lyc = memory.read(0xFF45);
+        memory.write(LCDY_ADDR, self.ly);
+        let lyc = memory.read(LYC_ADDR);
         
-        let mut value = memory.read(0xFF41);
+        let mut value = memory.read(STAT_ADDR);
+        let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
+
         if self.ly == lyc {
             value = value | (1 << 2);
+            if interrupt_on_equal_lyc {
+                memory.request_interrupt(Interrupt::LCD);
+            }
         } else {
             value = value | (0xFF ^ (1 << 2));
         }
-        memory.write(0xFF41, value);
+        memory.write(STAT_ADDR, value);
+
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {

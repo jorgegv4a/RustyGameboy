@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]
 use crate::constants::*;
+use crate::interrupt::Interrupt;
 
 #[derive(PartialEq)]
 pub enum Cartridge {
@@ -42,6 +43,13 @@ impl AddressSpace {
             dma_start_address: -1,
             dma_clock_t: 0,
         }
+    }
+
+    pub fn request_interrupt(&mut self, interrupt: Interrupt) {
+        let interrupt_mask = (1 << interrupt as usize);
+        let mut interrupt_flags = self.read(IF_ADDR);
+        interrupt_flags |= interrupt_mask;
+        self.write(IF_ADDR, interrupt_flags);
     }
 
     pub fn load_rom(&mut self, rom_bytes: Vec<u8>, cartridge_type: Cartridge) -> Result<(), String> {
