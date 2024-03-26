@@ -1,11 +1,5 @@
 #![allow(non_camel_case_types)]
-const GB_ROM_BANK_SIZE: usize = 16 * 1024;
-const GB_INTERNAL_RAM_SIZE: usize = 8 * 1024;
-const GB_VRAM_SIZE: usize = 8 * 1024;
-const OAM_SIZE: usize = 160;
-const CARTRIDGE_RAM_SIZE: usize = 8 * 1024;
-const CARTRIDGE_ROM_ONLY: usize = 0x00;
-const CARTRIDGE_MBC1: usize = 0x01;
+use crate::constants::*;
 
 #[derive(PartialEq)]
 pub enum Cartridge {
