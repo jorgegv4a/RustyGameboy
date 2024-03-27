@@ -36,16 +36,6 @@ pub struct PPU {
     canvas: sdl2::render::Canvas<sdl2::video::Window>,
 }
 
-// let sdl_context = sdl2::init()?;
-// let video_subsystem = sdl_context.video()?;
-
-// let window = video_subsystem
-//     .window("rust-sdl2 demo: Video", 800, 600)
-//     .position_centered()
-//     .opengl()
-//     .build()
-//     .map_err(|e| e.to_string())?;
-
 impl PPU {
     pub fn new(sdl_subsystem: VideoSubsystem) -> PPU {
         let window = sdl_subsystem
