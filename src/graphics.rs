@@ -1,22 +1,36 @@
 extern crate sdl2;
 
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
 use sdl2::VideoSubsystem;
 use std::collections::HashSet;
-// use std::ops::Add;
-// use std::ptr::metadata;
 use std::time::Duration;
 use std::collections::HashMap;
 use std::cmp::min;
 use sdl2::rect::Point;
 
-use rand::prelude::*;
-
 use crate::constants::*;
 use crate::interrupt::Interrupt;
 use crate::memory::AddressSpace;
+
+#[derive(Debug)]
+struct SpriteData {
+    x: u8,
+    y: u8,
+    raw_tile_index: u8,
+    attrs: u8
+}
+
+impl SpriteData {
+    fn new(sprite_index: u8, memory: &mut AddressSpace) -> SpriteData {
+        let sprite_bytes = memory.read_sprite(sprite_index);
+        SpriteData {
+            y: sprite_bytes[0],
+            x: sprite_bytes[1],
+            raw_tile_index: sprite_bytes[2],
+            attrs: sprite_bytes[3],
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum PPUMode {
@@ -30,7 +44,7 @@ pub enum PPUMode {
 pub struct PPU {
     dot: u16,
     ly: u8,
-    // drawing_current_line: bool,
+    line_objects: Vec<SpriteData>,
     mode: PPUMode,
     tick_i: u64,
     canvas: sdl2::render::Canvas<sdl2::video::Window>,
@@ -48,7 +62,7 @@ impl PPU {
         PPU {
             dot: 0,
             ly: 0,
-            // drawing_current_line: false,
+            line_objects: Vec::new(),
             mode: PPUMode::OAMScan,
             tick_i: 0,
             canvas,
@@ -95,23 +109,41 @@ impl PPU {
         return memory.read(WY_ADDR) as usize;
     }
 
+    fn get_stat_mode(&self, memory: &AddressSpace) -> u8 {
+        return (memory.read(STAT_ADDR) >> 2) & 7;
+    }
+
     fn single_tick(&mut self, memory: &mut AddressSpace) {
         if !self.get_ppu_enabled(memory) {
             return
         }
         // println!("PPU, dot: {}, ly: {}, mode: {:?}", self.dot, self.ly, self.mode);
+        let stat_modes = self.get_stat_mode(memory);
         match self.mode {
             PPUMode::OAMScan => {
                 if self.dot == 80 {
                     self.mode = PPUMode::Drawing;
+                    memory.lock_oam();
                     memory.request_interrupt(Interrupt::LCD);
+                } else {
+                    let sprite = SpriteData::new(self.dot as u8, memory);
+                    let sprite_height: u8 = if self.get_obj_size(memory) == false {8} else {16};
+                    let stop_scanning = !self.get_obj_enabled(memory) || (sprite.y < 8 && sprite_height == 8) || sprite.y == 0 || sprite.y >= 160 || self.line_objects.len() == 10;
+                    if !stop_scanning && (self.ly >= sprite.y && self.ly < sprite.y + sprite_height){
+                        self.line_objects.push(sprite);
+                    }
+                    self.dot += 1;
                 }
             },
             PPUMode::Drawing => {
                 if self.dot == 80 + 172 { 
                     self.mode = PPUMode::HBlank;
-                    memory.request_interrupt(Interrupt::LCD);
+                    memory.unlock_oam();
+                    if stat_modes & 1 == 1 {
+                        memory.request_interrupt(Interrupt::LCD);
+                    }
                 }
+                self.dot += 1;
             },
             PPUMode::HBlank => {
                 if self.dot == 456 { 
@@ -119,27 +151,42 @@ impl PPU {
                     self.ly += 1; 
                     if self.ly >= 144 { 
                         self.mode = PPUMode::VBlank;
+                        memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
-                        memory.request_interrupt(Interrupt::LCD);
+                        
+                        if (stat_modes >> 1) & 1 == 1 {
+                            memory.request_interrupt(Interrupt::LCD);
+                        }
                     } else { 
                         self.mode = PPUMode::OAMScan;
-                        memory.request_interrupt(Interrupt::LCD);
+                        self.line_objects.clear();
+                        memory.lock_oam();
+                        if (stat_modes >> 2) & 1 == 1 {
+                            memory.request_interrupt(Interrupt::LCD);
+                        }
                     };
+                } else {
+                    self.dot += 1;
                 }
             },
             PPUMode::VBlank => {
                 if self.dot == 456 { 
                     self.dot = 0; 
                     self.ly += 1; 
+                } else {
+                    self.dot += 1;
                 }
                 if self.ly == 154 { 
                     self.ly = 0; 
                     self.mode = PPUMode::OAMScan;
-                    memory.request_interrupt(Interrupt::LCD);
+                    self.line_objects.clear();
+                    memory.lock_oam();
+                    if (stat_modes >> 2) & 1 == 1 {
+                        memory.request_interrupt(Interrupt::LCD);
+                    }
                 };
             },
         };
-        self.dot += 1;
 
     self.set_ly(memory);
 
@@ -250,7 +297,6 @@ impl PPU {
             //     }
             // }
 
-            // self.image[:fit_y, :fit_x] = full_image[view_y0: view_y0 + fit_y, view_x0: view_x0 + fit_x]
             for j in 0..SCREEN_HEIGHT {
                 let src_row;
                 if j < fit_y {

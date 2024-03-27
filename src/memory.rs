@@ -24,6 +24,7 @@ pub struct AddressSpace {
     dma_start_address: i32,
     dma_clock_t: u16,
     joypad_state: u8,
+    oam_writeable: bool,
 }
 
 impl AddressSpace {
@@ -44,6 +45,7 @@ impl AddressSpace {
             dma_start_address: -1,
             dma_clock_t: 0,
             joypad_state: 0xFF,
+            oam_writeable: false,
         }
     }
 
@@ -95,6 +97,11 @@ impl AddressSpace {
         value
     }
 
+    pub fn read_sprite(&self, sprite_index: u8) -> &[u8] {
+        let idx = sprite_index as usize;
+        return &self.oam[idx..idx+4]
+    }
+
     fn joypad_return(&self) -> u8 {
         let selection = (self.standard_io[0] >> 4) & 0x3;
         if selection == 0x3 { // no selection, return no key presses
@@ -112,6 +119,14 @@ impl AddressSpace {
         }
     }
 
+    pub fn lock_oam(&mut self) {
+        self.oam_writeable = false;
+    }
+
+    pub fn unlock_oam(&mut self) {
+        self.oam_writeable = false;
+    }
+
     pub fn write(&mut self, index: u16, value: u8) {
         match index {
             0..=0x7FFF => println!("Tried to write into {:02X} which is not writeable", index),
@@ -119,7 +134,11 @@ impl AddressSpace {
             0xA000..=0xBFFF => self.ram_bank[index as usize - 0xA000] = value,
             0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000] = value,
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000] = value,
-            0xFE00..=0xFE9F => self.oam[index as usize - 0xFE00] = value, // TODO: disable access except during H/V Blank
+            0xFE00..=0xFE9F => {
+                if self.oam_writeable {
+                    self.oam[index as usize - 0xFE00] = value
+                }
+            }
             0xFEA0..=0xFEFF => self.empty_io[index as usize - 0xFEA0] = value,
             // 0xFF00 => self.standard_io[index as usize - 0xFF00] |= value & 0xF0,
             idx @ 0xFF00..=0xFF4B => 
