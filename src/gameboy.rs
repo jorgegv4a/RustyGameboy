@@ -7,11 +7,13 @@ use crate::cpu::{CPU, DEBUG};
 use crate::memory::{AddressSpace, Cartridge};
 use crate::graphics::PPU;
 use crate::interrupt::Interrupt;
+use crate::joypad::Joypad;
 
 pub struct Gameboy {
     cpu: CPU,
     memory: AddressSpace,
     ppu: PPU,
+    joypad: Joypad,
 }
 
 impl Gameboy {
@@ -22,6 +24,7 @@ impl Gameboy {
             cpu: CPU::new(),
             memory: AddressSpace::new(),
             ppu: PPU::new(video_subsystem),
+            joypad: Joypad::new(),
         }
     }
 
@@ -78,10 +81,11 @@ impl Gameboy {
             let opcode_byte = self.cpu.fetch(&self.memory);
             let (opcode_dict, opcode) = self.cpu.decode(opcode_byte, &self.memory);
             let nticks = self.cpu.execute(opcode, opcode_dict, &mut self.memory);
-
+            
             self.cpu.tick(nticks);
-            self.memory.tick(nticks);
             self.ppu.tick(nticks, &mut self.memory);
+            self.joypad.tick(nticks, &mut self.memory);
+            self.memory.tick(nticks);
             if self.memory.read(SC_ADDR) == 0x81 {
                 if !DEBUG {
                     print!("{}", std::char::from_u32(self.memory.read(SB_ADDR) as u32).unwrap_or('?'));

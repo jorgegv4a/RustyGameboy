@@ -49,7 +49,7 @@ pub struct PPU {
 impl PPU {
     pub fn new(sdl_subsystem: VideoSubsystem) -> PPU {
         let window = sdl_subsystem
-            .window("rust-sdl2 demo: Video", 256, 256)
+            .window("rust-sdl2 demo: Video", SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
             .position_centered()
             .opengl()
             .build()
@@ -252,12 +252,31 @@ impl PPU {
             let fit_x = min(SCREEN_WIDTH, margin_x);
             let fit_y = min(SCREEN_HEIGHT, margin_y);
 
+            // for j in 0..256 as i32 {
+            //     for i in 0..256 as i32 {
+            //         let color = full_image[j as usize][i as usize];
+            //         self.canvas.set_draw_color(Color::RGB(color, color, color));
+            //         self.canvas.draw_point(Point::new(i, j)).unwrap();
+            //     }
+            // }
+
             // self.image[:fit_y, :fit_x] = full_image[view_y0: view_y0 + fit_y, view_x0: view_x0 + fit_x]
-            for j in 0..256 as i32 {
-                for i in 0..256 as i32 {
-                    let color = full_image[j as usize][i as usize];
+            for j in 0..SCREEN_HEIGHT {
+                let src_row;
+                if j < fit_y {
+                    src_row = full_image[view_y0 + j as usize];
+                } else {
+                    src_row = full_image[margin_y + j as usize];
+                }
+                for i in 0..SCREEN_WIDTH {
+                    let color;
+                    if i < fit_x {
+                        color = src_row[view_x0 + i as usize];
+                    } else {
+                        color = src_row[margin_x + i as usize];
+                    }
                     self.canvas.set_draw_color(Color::RGB(color, color, color));
-                    self.canvas.draw_point(Point::new(i, j)).unwrap();
+                    self.canvas.draw_point(Point::new(i as i32, j as i32)).unwrap();
                 }
             }
 

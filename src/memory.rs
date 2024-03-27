@@ -23,6 +23,7 @@ pub struct AddressSpace {
     interrupt_enable: [u8; 1],
     dma_start_address: i32,
     dma_clock_t: u16,
+    joypad_state: u8,
 }
 
 impl AddressSpace {
@@ -42,6 +43,7 @@ impl AddressSpace {
             interrupt_enable: [0; 1],
             dma_start_address: -1,
             dma_clock_t: 0,
+            joypad_state: 0xFF,
         }
     }
 
@@ -84,16 +86,30 @@ impl AddressSpace {
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000],
             0xFE00..=0xFE9F => self.oam[index as usize - 0xFE00],
             0xFEA0..=0xFEFF => self.empty_io[index as usize - 0xFEA0],
-            0xFF00 => 0xFF,
-            // 0xFF01..=0xFF43 => self.standard_io[index as usize - 0xFF00],
-            // 0xFF44 => 0x90,
-            // 0xFF45..=0xFF4B => self.standard_io[index as usize - 0xFF00],
+            0xFF00 => self.joypad_return(),
             0xFF01..=0xFF4B => self.standard_io[index as usize - 0xFF00],
             0xFF4C..=0xFF7F => self.empty_io2[index as usize - 0xFF4C],
             0xFF80..=0xFFFE => self.hram[index as usize - 0xFF80],
             0xFFFF => self.interrupt_enable[index as usize - 0xFFFF],
         };
         value
+    }
+
+    fn joypad_return(&self) -> u8 {
+        let selection = (self.standard_io[0] >> 4) & 0x3;
+        if selection == 0x3 { // no selection, return no key presses
+            return (selection << 4) | 0xF
+        } else {
+            let mut state = 0xFF;
+            if selection & 1 == 0 { // select d-pad
+                state &= self.joypad_state & 0xF;
+            }
+
+            if (selection >> 1) & 1 == 0 { // select buttons
+                state &= (self.joypad_state >> 4) & 0xF;
+            }
+            state
+        }
     }
 
     pub fn write(&mut self, index: u16, value: u8) {
@@ -105,11 +121,14 @@ impl AddressSpace {
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000] = value,
             0xFE00..=0xFE9F => self.oam[index as usize - 0xFE00] = value, // TODO: disable access except during H/V Blank
             0xFEA0..=0xFEFF => self.empty_io[index as usize - 0xFEA0] = value,
+            // 0xFF00 => self.standard_io[index as usize - 0xFF00] |= value & 0xF0,
             idx @ 0xFF00..=0xFF4B => 
             {
                 if idx == 0xFF46 {
                     self.dma_start_address = 0x100 * value as i32
-                } else{
+                } else if idx == 0xFF00{
+                    self.standard_io[0] = (value & 0xF0) | (self.standard_io[0] & 0xF)
+                } else {
                     self.standard_io[index as usize - 0xFF00] = value
                 }
             }
@@ -117,6 +136,10 @@ impl AddressSpace {
             0xFF80..=0xFFFE => self.hram[index as usize - 0xFF80] = value,
             0xFFFF => self.interrupt_enable[index as usize - 0xFFFF] = value,
         };
+    }
+
+    pub fn joypad_write(&mut self, state: u8) {
+        self.joypad_state = state;
     }
 
     fn single_tick(&mut self) {

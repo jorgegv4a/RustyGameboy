@@ -34,3 +34,5 @@ pub const SC_ADDR: u16 = 0xFF02;
 
 pub const IF_ADDR: u16 = 0xFF0F;
 pub const IE_ADDR: u16 = 0xFFFF;
+
+pub const JOYP_ADDR: u16 = 0xFF00;
