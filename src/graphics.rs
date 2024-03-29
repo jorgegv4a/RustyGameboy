@@ -7,6 +7,7 @@ use std::time::Duration;
 use std::collections::HashMap;
 use std::cmp::min;
 use sdl2::rect::Point;
+use std::time::Instant;
 
 use crate::constants::*;
 use crate::interrupt::Interrupt;
@@ -67,6 +68,10 @@ impl PPU {
             tick_i: 0,
             canvas,
         }
+    }
+
+    fn get_bg_win_display(&self, memory: &AddressSpace) -> bool {
+        return (memory.read(LCDC_ADDR) >> LCDC_BG_WIN_DISPLAY_BIT) & 1 == 1;
     }
 
     fn get_win_tile_map(&self, memory: &AddressSpace) -> bool {
@@ -142,6 +147,7 @@ impl PPU {
                     if stat_modes & 1 == 1 {
                         memory.request_interrupt(Interrupt::LCD);
                     }
+                    self.show(memory);
                 }
                 self.dot += 1;
             },
@@ -190,8 +196,8 @@ impl PPU {
 
     self.set_ly(memory);
 
-        self.show(memory);
-        self.tick_i += 1
+    // self.show(memory);
+    self.tick_i += 1
     }
 
     fn set_ly(&self, memory: &mut AddressSpace) {
@@ -245,8 +251,8 @@ impl PPU {
             let tile_low_byte = memory.read(tile_start_i + 2 * j);
             let tile_high_byte = memory.read((tile_start_i + 2 * j) + 1);
             for i in 0..8 {
-                let low_byte = ((tile_low_byte >> i) & 1);
-                let high_byte = (((tile_high_byte >> i) & 1) << 1);
+                let low_byte = (tile_low_byte >> i) & 1;
+                let high_byte = ((tile_high_byte >> i) & 1) << 1;
                 let color_id = high_byte | low_byte;
                 let color = (((color_id as f32) / 3f32) * 255f32) as u8;
                 tile[j as usize][(7 - i) as usize] = 255 - color;
@@ -255,8 +261,9 @@ impl PPU {
         tile
     }
 
-    fn show(&mut self, memory: &AddressSpace) {
+    fn show_bg(&mut self, memory: &AddressSpace) {
         if self.tick_i % 70224 == 0 {
+            let t0 = Instant::now();
             let mut full_image = [[0u8; 256]; 256];
             let (bg_map, unique_tiles) = self.get_background_tile_map(memory);
             let mut tiles: HashMap<u16, [[u8; 8]; 8]> = HashMap::new();
@@ -322,6 +329,64 @@ impl PPU {
             // self.canvas.set_draw_color(Color::RGB(random(), random(), random()));
             // self.canvas.clear();
             // self.canvas.present();
+            println!("Frame time: {}", t0.elapsed().as_millis());
         }
+    }
+
+    fn show(&mut self, memory: &AddressSpace) {
+        let t0 = Instant::now();
+        let mut t1 = Instant::now();
+        
+        let line_j = self.ly as usize;
+
+        let view_y0 = self.scy(memory);
+        let view_x0 = self.scx(memory);
+
+        let margin_x = 255 - view_x0;
+        let margin_y = 255 - view_y0;
+
+        let fit_x = min(SCREEN_WIDTH, margin_x);
+        let fit_y = min(SCREEN_HEIGHT, margin_y);
+
+        let tile_map_base_address: u16 = if self.get_bg_tile_map(memory) { 0x9C00 } else { 0x9800 };
+        let direct_data_zone = self.get_bg_win_tile_data_zone(memory);
+
+        for i in 0..SCREEN_WIDTH {
+            let src_row;
+            if line_j < fit_y {
+                src_row = view_y0 + line_j;
+            } else {
+                src_row = margin_y + line_j;
+            }
+            let tile_y = src_row / 8;
+            let tile_offset_y = src_row % 8;
+
+            let src_col;
+            if i < fit_x {
+                src_col = view_x0 + i;
+            } else {
+                src_col = margin_x + i;
+            }
+            let tile_x = src_col / 8;
+            let tile_offset_x = src_col % 8;
+
+            let tile_map_idx = tile_y * 32 + tile_x;
+            let tile_offset = memory.read(tile_map_base_address + tile_map_idx as u16) as u16;
+            let tile_idx: u16 = if direct_data_zone {
+                0x8000 + tile_offset * 16
+            } else {
+                (0x9000 + ((tile_offset as i32) - 128) * 16) as u16
+            };
+            let tile = self.get_tile(memory, tile_idx);
+            let color = tile[tile_offset_y][tile_offset_x];
+            self.canvas.set_draw_color(Color::RGB(color, color, color));
+            self.canvas.draw_point(Point::new(i as i32, line_j as i32)).unwrap();
+        }
+
+        println!("Draw line: {}", t1.elapsed().as_micros());
+        t1 = Instant::now();
+        self.canvas.present();
+        println!("Present line: {}", t1.elapsed().as_micros());
+        println!("Frame time: {}\n", t0.elapsed().as_micros());
     }
 }

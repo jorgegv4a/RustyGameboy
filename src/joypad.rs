@@ -99,7 +99,6 @@ impl Joypad {
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
         self.ticks += nticks as u64;
         if self.ticks >= 7022 {
-            println!("Joy tick");
             self.ticks = self.ticks % 7022;
             self.update_state(memory);
             self.update_memory(memory);

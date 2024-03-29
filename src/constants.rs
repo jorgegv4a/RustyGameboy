@@ -11,6 +11,7 @@ pub const SCREEN_WIDTH: usize = 160;
 pub const NUM_DOTS_PER_LINE: usize = 456;
 pub const NUM_SCAN_LINES: usize = 154;
 
+pub const LCDC_BG_WIN_DISPLAY_BIT: u8 = 0;
 pub const LCDC_OBJ_ENABLE_BIT: u8 = 1;
 pub const LCDC_OBJ_SIZE_BIT: u8 = 2;
 pub const LCDC_BG_TILE_MAP_BIT: u8 = 3;
