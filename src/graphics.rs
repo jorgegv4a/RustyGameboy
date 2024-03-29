@@ -129,13 +129,21 @@ impl PPU {
                 if self.dot == 80 {
                     self.mode = PPUMode::Drawing;
                     memory.lock_oam();
+                    memory.lock_vram();
                     memory.request_interrupt(Interrupt::LCD);
                 } else {
-                    let sprite = SpriteData::new(self.dot as u8, memory);
+                    let sprite = SpriteData::new((self.dot / 2) as u8, memory);
                     let sprite_height: u8 = if self.get_obj_size(memory) == false {8} else {16};
-                    let stop_scanning = !self.get_obj_enabled(memory) || (sprite.y < 8 && sprite_height == 8) || sprite.y == 0 || sprite.y >= 160 || self.line_objects.len() == 10;
-                    if !stop_scanning && (self.ly >= sprite.y && self.ly < sprite.y + sprite_height){
-                        self.line_objects.push(sprite);
+                    let sprites_disabled = !self.get_obj_enabled(memory);
+                    let short_sprite_hidden = (sprite.y < 8 && sprite_height == 8);
+                    let sprite_hidden_0 = sprite.y == 0;
+                    let sprite_hidden_160 = sprite.y == 160;
+                    let sprites_full = self.line_objects.len() == 10;
+                    let stop_scanning = sprites_disabled || short_sprite_hidden || sprite_hidden_0 || sprite_hidden_160 || sprites_full;
+                    if !stop_scanning{
+                        if self.ly >= sprite.y && self.ly < sprite.y + sprite_height {
+                            self.line_objects.push(sprite);
+                        }
                     }
                     self.dot += 1;
                 }
@@ -144,6 +152,7 @@ impl PPU {
                 if self.dot == 80 + 172 { 
                     self.mode = PPUMode::HBlank;
                     memory.unlock_oam();
+                    memory.unlock_vram();
                     if stat_modes & 1 == 1 {
                         memory.request_interrupt(Interrupt::LCD);
                     }

@@ -25,6 +25,7 @@ pub struct AddressSpace {
     dma_clock_t: u16,
     joypad_state: u8,
     oam_writeable: bool,
+    vram_writeable: bool,
 }
 
 impl AddressSpace {
@@ -46,6 +47,7 @@ impl AddressSpace {
             dma_clock_t: 0,
             joypad_state: 0xFF,
             oam_writeable: false,
+            vram_writeable: false,
         }
     }
 
@@ -82,11 +84,19 @@ impl AddressSpace {
         let value = match index {
             0..=0x3FFF => self.rom_bank[index as usize],
             0x4000..=0x7FFF => self.active_rom_bank[index as usize - 0x4000],
-            0x8000..=0x9FFF => self.vram[index as usize - 0x8000],
+            0x8000..=0x9FFF => if self.vram_writeable {
+                self.vram[index as usize - 0x8000]
+            } else {
+                0xFF
+            },
             0xA000..=0xBFFF => self.ram_bank[index as usize - 0xA000],
             0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000],
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000],
-            0xFE00..=0xFE9F => self.oam[index as usize - 0xFE00],
+            0xFE00..=0xFE9F => if self.oam_writeable {
+                self.oam[index as usize - 0xFE00]
+            } else {
+                0xFF
+            },
             0xFEA0..=0xFEFF => self.empty_io[index as usize - 0xFEA0],
             0xFF00 => self.joypad_return(),
             0xFF01..=0xFF4B => self.standard_io[index as usize - 0xFF00],
@@ -119,6 +129,14 @@ impl AddressSpace {
         }
     }
 
+    pub fn lock_vram(&mut self) {
+        self.vram_writeable = false;
+    }
+
+    pub fn unlock_vram(&mut self) {
+        self.vram_writeable = true;
+    }
+
     pub fn lock_oam(&mut self) {
         self.oam_writeable = false;
     }
@@ -130,7 +148,9 @@ impl AddressSpace {
     pub fn write(&mut self, index: u16, value: u8) {
         match index {
             0..=0x7FFF => println!("Tried to write into {:02X} which is not writeable", index),
-            0x8000..=0x9FFF => self.vram[index as usize - 0x8000] = value,
+            0x8000..=0x9FFF => if self.vram_writeable {
+                self.vram[index as usize - 0x8000] = value
+            },
             0xA000..=0xBFFF => self.ram_bank[index as usize - 0xA000] = value,
             0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000] = value,
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000] = value,
