@@ -26,6 +26,10 @@ pub const SCY_ADDR: u16 = 0xFF42;
 pub const WX_ADDR: u16 = 0xFF4A;
 pub const WY_ADDR: u16 = 0xFF4B;
 
+pub const BGP_ADDR: u16 = 0xFF47;
+pub const OBP0_ADDR: u16 = 0xFF48;
+pub const OBP1_ADDR: u16 = 0xFF49;
+
 pub const LCDY_ADDR: u16 = 0xFF44;
 pub const STAT_ADDR: u16 = 0xFF41;
 pub const LYC_ADDR: u16 = 0xFF45;

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::cmp::{min, max, Ordering};
 use sdl2::rect::Point;
 use std::time::Instant;
+use std::convert::Into;
 
 use crate::constants::*;
 use crate::interrupt::Interrupt;
@@ -21,6 +22,39 @@ enum ColorId {
     Two = 2,
     Three = 3,
     Debug = 4,
+    Blank = 5,
+}
+
+impl Into<Color> for ColorId {
+    fn into(self) -> Color {
+        match self {
+            ColorId::Zero => Color::RGB(255, 255, 255),
+            ColorId::One => Color::RGB(170, 170, 170),
+            ColorId::Two => Color::RGB(85, 85, 85),
+            ColorId::Three => Color::RGB(0, 0, 0),
+            ColorId::Debug => Color::RGB(255, 0, 0),
+            ColorId::Blank => Color::RGB(255, 255, 255),
+        }
+    }
+}
+
+impl From<u8> for ColorId {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => ColorId::Zero,
+            1 => ColorId::One,
+            2 => ColorId::Two,
+            3 => ColorId::Three,
+            _ => panic!("Invalid value for palette: {value} range (0-3)"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ColorPalette {
+    BPG,
+    OBP0,
+    OBP1,
 }
 
 #[derive(Debug)]
@@ -64,7 +98,7 @@ struct SpriteAttributes {
     priority: bool,
     x_flip: bool,
     y_flip: bool,
-    palette: bool,
+    palette: ColorPalette,
 }
 
 impl SpriteAttributes {
@@ -73,7 +107,7 @@ impl SpriteAttributes {
             priority: (attrs >> 7) & 1 == 1,
             x_flip: (attrs >> 6) & 1 == 1,
             y_flip: (attrs >> 5) & 1 == 1,
-            palette: (attrs >> 4) & 1 == 1,
+            palette: if (attrs >> 4) & 1 == 1 { ColorPalette::OBP1 } else { ColorPalette::OBP0 },
         }
     }
 }
@@ -349,8 +383,8 @@ impl PPU {
         (tile_map, unique_tiles)
     }
 
-    fn get_tile(&self, memory: &AddressSpace, tile_start_i: u16) -> [[ColorId; 8]; 8] {
-        let mut tile: [[ColorId; 8]; 8] = [[ColorId::Zero; 8]; 8];
+    fn get_tile(&self, memory: &AddressSpace, tile_start_i: u16) -> [[u8; 8]; 8] {
+        let mut tile: [[u8; 8]; 8] = [[0u8; 8]; 8];
         for j in 0..8 {
             let tile_low_byte = memory.read(tile_start_i + 2 * j);
             let tile_high_byte = memory.read((tile_start_i + 2 * j) + 1);
@@ -360,20 +394,14 @@ impl PPU {
                 let color_id = min(3, max(0, high_byte | low_byte));
                 // let color = (((color_id as f32) / 3f32) * 255f32) as u8;
                 // tile[j as usize][(7 - i) as usize] = color;
-                tile[j as usize][(7 - i) as usize] = match color_id {
-                    0 => ColorId::Zero,
-                    1 => ColorId::One,
-                    2 => ColorId::Two,
-                    3 => ColorId::Three,
-                    _ => todo!()
-                };
+                tile[j as usize][(7 - i) as usize] = color_id;
             }
         };
         tile
     }
 
-    fn get_double_tile(&self, memory: &AddressSpace, tile_start_i: u16) -> [[ColorId; 8]; 16] {
-        let mut tile: [[ColorId; 8]; 16] = [[ColorId::Zero; 8]; 16];
+    fn get_double_tile(&self, memory: &AddressSpace, tile_start_i: u16) -> [[u8; 8]; 16] {
+        let mut tile: [[u8; 8]; 16] = [[0u8; 8]; 16];
         for j in 0..16 {
             let tile_low_byte = memory.read(tile_start_i + 2 * j);
             let tile_high_byte = memory.read((tile_start_i + 2 * j) + 1);
@@ -383,13 +411,7 @@ impl PPU {
                 let color_id = min(3, max(0, high_byte | low_byte));
                 // let color = (((color_id as f32) / 3f32) * 255f32) as u8;
                 // tile[j as usize][(7 - i) as usize] = color;
-                tile[j as usize][(7 - i) as usize] = match color_id {
-                    0 => ColorId::Zero,
-                    1 => ColorId::One,
-                    2 => ColorId::Two,
-                    3 => ColorId::Three,
-                    _ => todo!()
-                };
+                tile[j as usize][(7 - i) as usize] = color_id;
             }
         };
         tile
@@ -490,6 +512,14 @@ impl PPU {
 
         let sprite_height: usize = if self.get_obj_size(memory) == false {8} else {16};
 
+        let BPG = memory.read(BGP_ADDR);
+        let OBP0 = memory.read(OBP0_ADDR);
+        let OBP1 = memory.read(OBP1_ADDR);
+
+        let bpg_palette = make_palette(BPG);
+        let obp0_palette = make_palette(OBP0);
+        let obp1_palette = make_palette(OBP1);
+
         // let window_x_condition = self.wx(memory) <= 166;
         let ayy = self.window_y_condition;
         let win_x = self.wx(memory);
@@ -504,7 +534,7 @@ impl PPU {
         }
 
         for i in 0..SCREEN_WIDTH {
-            let bg_color: ColorId;
+            let bg_color: u8;
             if self.window_y_condition && i + 7 >= win_x && self.window_enabled(memory) {
                 let src_row = self.wly;
                 let tile_y = src_row / 8;
@@ -553,7 +583,7 @@ impl PPU {
                 bg_color = tile[tile_offset_y][tile_offset_x];
             }
 
-            let mut sprite_pixel: Option<(ColorId, bool)> = None;
+            let mut sprite_pixel: Option<(u8, ColorPalette, bool)> = None;
             for sprite in self.line_objects.iter() {
                 if i + 8 >= sprite.x as usize && i < sprite.x as usize {
                     let mut sprite_idx = sprite.raw_tile_index;
@@ -595,8 +625,8 @@ impl PPU {
                     //     // first sprite found
                     //     sprite_pixel = Some((sprite_color, sprite.attrs.priority));
                     // }
-                    if sprite_color != ColorId::Zero {
-                        sprite_pixel = Some((sprite_color, sprite.attrs.priority));
+                    if sprite_color != 0 {
+                        sprite_pixel = Some((sprite_color, sprite.attrs.palette, sprite.attrs.priority));
                         break
                     }
                 }
@@ -604,35 +634,44 @@ impl PPU {
             // self.get_bg_win_display(memory)
 
 
-            let color;
+            let color: u8;
+            let color_palette: ColorPalette;
             if sprite_pixel.is_some() {
-                let (sprite_color, sprite_prio) = sprite_pixel.unwrap();
+                let (sprite_color, sprite_palette, sprite_prio) = sprite_pixel.unwrap();
                 if self.get_bg_win_display(memory) {
-                    if sprite_color == ColorId::Zero {
+                    if sprite_color == 0 {
                         color = bg_color;
-                    } else if sprite_prio && bg_color != ColorId::Zero {
+                        color_palette = ColorPalette::BPG;
+                    } else if sprite_prio && bg_color != 0 {
                         color = bg_color;
+                        color_palette = ColorPalette::BPG;
                     } else {
                         color = sprite_color;
+                        color_palette = sprite_palette;
                     }
                 } else {
                     color = sprite_color;
+                    color_palette = sprite_palette;
                 }
             } else {
                 if self.get_bg_win_display(memory) {
                     color = bg_color;
+                    color_palette = ColorPalette::BPG;
                 } else {
-                    color = ColorId::Zero;
+                    color = 4;
+                    color_palette = ColorPalette::BPG;
                 }
             }
             // color = bg_color;
-            let color_value = match color {
-                ColorId::Zero => Color::RGB(255, 255, 255),
-                ColorId::One => Color::RGB(170, 170, 170),
-                ColorId::Two => Color::RGB(85, 85, 85),
-                ColorId::Three => Color::RGB(0, 0, 0),
-                ColorId::Debug => Color::RGB(255, 0, 0),
+            let color_value = match (color_palette, color) {
+                (ColorPalette::BPG, 4) => Color::RGB(255, 255, 255),
+                (ColorPalette::BPG, _) => bpg_palette[color as usize].into(),
+                (ColorPalette::OBP1, 0) => Color::RGB(0, 255, 0),
+                (ColorPalette::OBP0, 0) => Color::RGB(0, 255, 0),
+                (ColorPalette::OBP0, _) => obp0_palette[color as usize].into(),
+                (ColorPalette::OBP1, _) => obp1_palette[color as usize].into(),
             };
+            
             self.canvas.set_draw_color(color_value);
             self.canvas.draw_point(Point::new(i as i32, line_j as i32)).unwrap();
         }
@@ -643,4 +682,13 @@ impl PPU {
         println!("Present line: {}", t1.elapsed().as_micros());
         println!("Frame time: {}\n", t0.elapsed().as_micros());
     }
+}
+
+fn make_palette(packed_palette: u8) -> [ColorId; 4] {
+    let mut palette: [ColorId; 4] = [ColorId::Zero; 4];
+    for i in 0..4 {
+        let color = (packed_palette >> i * 2) & 0x3;
+        palette[i] = ColorId::from(color);
+    }
+    palette
 }
