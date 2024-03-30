@@ -105,8 +105,8 @@ impl SpriteAttributes {
     fn new(attrs: u8) -> SpriteAttributes {
         SpriteAttributes {
             priority: (attrs >> 7) & 1 == 1,
-            x_flip: (attrs >> 6) & 1 == 1,
-            y_flip: (attrs >> 5) & 1 == 1,
+            x_flip: (attrs >> 5) & 1 == 1,
+            y_flip: (attrs >> 6) & 1 == 1,
             palette: if (attrs >> 4) & 1 == 1 { ColorPalette::OBP1 } else { ColorPalette::OBP0 },
         }
     }
