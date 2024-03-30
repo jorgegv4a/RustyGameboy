@@ -44,12 +44,12 @@ impl Gameboy {
     fn check_interrupts(&self) -> Option<Interrupt> {
         let interrupt_flags = self.memory.read(IF_ADDR);
         let interrupt_enables = self.memory.read(IE_ADDR);
-        if !self.cpu.master_interrupt_enable {
+        if !self.cpu.master_interrupt_enable || interrupt_flags == 0 || interrupt_enables == 0 {
             return None
         }
 
         for interrupt_i in 0..5 {
-            if (interrupt_flags << interrupt_i) & 1 == 1 && (interrupt_enables << interrupt_i) & 1 == 1 {
+            if (interrupt_flags >> interrupt_i) & 1 == 1 && (interrupt_enables >> interrupt_i) & 1 == 1 {
                 return Some(Interrupt::from(interrupt_i))
             };
         };
@@ -59,7 +59,7 @@ impl Gameboy {
     fn serve_interrupt(&mut self, interrupt: Interrupt) {
         self.cpu.master_interrupt_enable = false;
         let mut interrupt_flags = self.memory.read(IF_ADDR);
-        interrupt_flags = (interrupt_flags << interrupt as usize) & (0xFF ^ (1 << interrupt as usize));
+        interrupt_flags = interrupt_flags & (0xFF ^ (1 << interrupt as usize));
         self.memory.write(IF_ADDR, interrupt_flags);
         
         let address = 0x40 + 8 * interrupt as u16;
