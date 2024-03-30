@@ -142,7 +142,7 @@ impl AddressSpace {
     }
 
     pub fn unlock_oam(&mut self) {
-        self.oam_writeable = false;
+        self.oam_writeable = true;
     }
 
     pub fn write(&mut self, index: u16, value: u8) {
@@ -160,7 +160,6 @@ impl AddressSpace {
                 }
             }
             0xFEA0..=0xFEFF => self.empty_io[index as usize - 0xFEA0] = value,
-            // 0xFF00 => self.standard_io[index as usize - 0xFF00] |= value & 0xF0,
             idx @ 0xFF00..=0xFF4B => 
             {
                 if idx == 0xFF46 {
@@ -188,6 +187,7 @@ impl AddressSpace {
         let oam_index = (self.dma_clock_t / 4) as usize;
         let mem_address = (self.dma_start_address as u16) + self.dma_clock_t / 4;
         self.oam[oam_index] = self.read(mem_address);
+        self.dma_clock_t += 1;
         if self.dma_clock_t >= 0xA0 {
             self.dma_clock_t = 0;
             self.dma_start_address = -1;
