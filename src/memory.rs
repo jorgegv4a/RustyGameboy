@@ -164,8 +164,10 @@ impl AddressSpace {
             {
                 if idx == 0xFF46 {
                     self.dma_start_address = 0x100 * value as i32
-                } else if idx == 0xFF00{
+                } else if idx == 0xFF00 {
                     self.standard_io[0] = (value & 0xF0) | (self.standard_io[0] & 0xF)
+                } else if idx == STAT_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = (value & 0xF8) | (self.standard_io[index as usize - 0xFF00] & 0x07)
                 } else {
                     self.standard_io[index as usize - 0xFF00] = value
                 }
