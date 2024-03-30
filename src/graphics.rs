@@ -213,7 +213,7 @@ impl PPU {
         let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
 
         if self.ly == lyc {
-            if interrupt_on_equal_lyc && (value >> 2) & 1 == 0 {
+            if interrupt_on_equal_lyc {
                 return true;
             }
         }
@@ -235,7 +235,7 @@ impl PPU {
             return
         }
         // println!("PPU, dot: {}, ly: {}, mode: {:?}", self.dot, self.ly, self.mode);
-        let stat_modes = self.get_stat_mode(memory);
+        let stat_irq = self.check_stat_irq(memory);
         match self.mode {
             PPUMode::OAMScan => {
                 if self.ly == self.wy(memory) as u8 {
@@ -268,20 +268,15 @@ impl PPU {
                 }
             },
             PPUMode::Drawing => {
-                let stat_irq = self.check_stat_irq(memory);
                 if self.dot == 80 + 172 { 
                     self.mode = PPUMode::HBlank;
                     memory.unlock_oam();
                     memory.unlock_vram();
-                    if stat_modes & 1 == 1 && !stat_irq {
-                        memory.request_interrupt(Interrupt::LCD);
-                    }
                     self.show(memory);
                 }
                 self.dot += 1;
             },
             PPUMode::HBlank => {
-                let stat_irq = self.check_stat_irq(memory);
                 if self.dot == 456 { 
                     self.dot = 0; 
                     self.ly += 1; 
@@ -289,10 +284,6 @@ impl PPU {
                         self.mode = PPUMode::VBlank;
                         memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
-                        
-                        if (stat_modes >> 1) & 1 == 1 && !stat_irq{
-                            memory.request_interrupt(Interrupt::LCD);
-                        }
                     } else { 
                         if self.window_y_condition {
                             self.wly += 1;
@@ -300,16 +291,12 @@ impl PPU {
                         self.mode = PPUMode::OAMScan;
                         self.line_objects.clear();
                         memory.lock_oam();
-                        if (stat_modes >> 2) & 1 == 1 && !stat_irq{
-                            memory.request_interrupt(Interrupt::LCD);
-                        }
                     };
                 } else {
                     self.dot += 1;
                 }
             },
             PPUMode::VBlank => {
-                let stat_irq = self.check_stat_irq(memory);
                 if self.dot == 456 { 
                     self.dot = 0; 
                     self.ly += 1; 
@@ -323,32 +310,26 @@ impl PPU {
                     self.window_y_condition = false;
                     self.wly = 0;
                     memory.lock_oam();
-                    if (stat_modes >> 2) & 1 == 1 && !stat_irq {
-                        memory.request_interrupt(Interrupt::LCD);
-                    }
                 };
             },
         };
 
     self.set_ly(memory);
+    if !stat_irq && self.check_stat_irq(memory) {
+        memory.request_interrupt(Interrupt::LCD);
+    }
 
     // self.show(memory);
     self.tick_i += 1
     }
 
     fn set_ly(&self, memory: &mut AddressSpace) {
-        let stat_irq = self.check_stat_irq(memory);
-
         memory.write(LCDY_ADDR, self.ly);
         let lyc = memory.read(LYC_ADDR);
         
         let mut value = memory.read(STAT_ADDR);
-        let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
 
         if self.ly == lyc {
-            if interrupt_on_equal_lyc && (value >> 2) & 1 == 0 && !stat_irq {
-                memory.request_interrupt(Interrupt::LCD);
-            }
             value = value | (1 << 2);
         } else {
             value = value & (0xFF ^ (1 << 2));
@@ -593,9 +574,6 @@ impl PPU {
                     let sprite_tile_idx = 0x8000 + (sprite_idx as u16) * 16;
 
                     let within_sprite_y = line_j + 16 - sprite.y as usize;
-                    // if within_sprite_y >= sprite_height {
-                    //     continue;
-                    // }
                     
                     let sprite_row;
                     if sprite_height == 8 {
@@ -621,18 +599,12 @@ impl PPU {
                     } else {
                         sprite_color = sprite_row[within_sprite_x]
                     }
-                    // if sprite_pixel.is_none() {
-                    //     // first sprite found
-                    //     sprite_pixel = Some((sprite_color, sprite.attrs.priority));
-                    // }
                     if sprite_color != 0 {
                         sprite_pixel = Some((sprite_color, sprite.attrs.palette, sprite.attrs.priority));
                         break
                     }
                 }
             }
-            // self.get_bg_win_display(memory)
-
 
             let color: u8;
             let color_palette: ColorPalette;
@@ -658,13 +630,13 @@ impl PPU {
                     color = bg_color;
                     color_palette = ColorPalette::BPG;
                 } else {
-                    color = 4;
+                    color = 0;
                     color_palette = ColorPalette::BPG;
                 }
             }
             // color = bg_color;
             let color_value = match (color_palette, color) {
-                (ColorPalette::BPG, 4) => Color::RGB(255, 255, 255),
+                // (ColorPalette::BPG, 4) => Color::RGB(255, 255, 255),
                 (ColorPalette::BPG, _) => bpg_palette[color as usize].into(),
                 (ColorPalette::OBP1, 0) => Color::RGB(0, 255, 0),
                 (ColorPalette::OBP0, 0) => Color::RGB(0, 255, 0),
