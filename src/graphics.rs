@@ -5,112 +5,15 @@ use sdl2::VideoSubsystem;
 use std::collections::HashSet;
 use std::time::Duration;
 use std::collections::HashMap;
-use std::cmp::{min, max, Ordering};
+use std::cmp::{min, max};
 use sdl2::rect::Point;
 use std::time::Instant;
 use std::convert::Into;
 
-use crate::constants::*;
+use crate::{constants::*, memory};
 use crate::interrupt::Interrupt;
 use crate::memory::AddressSpace;
-
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ColorId {
-    Zero = 0,
-    One = 1,
-    Two = 2,
-    Three = 3,
-    Debug = 4,
-    Blank = 5,
-}
-
-impl Into<Color> for ColorId {
-    fn into(self) -> Color {
-        match self {
-            ColorId::Zero => Color::RGB(255, 255, 255),
-            ColorId::One => Color::RGB(170, 170, 170),
-            ColorId::Two => Color::RGB(85, 85, 85),
-            ColorId::Three => Color::RGB(0, 0, 0),
-            ColorId::Debug => Color::RGB(255, 0, 0),
-            ColorId::Blank => Color::RGB(255, 255, 255),
-        }
-    }
-}
-
-impl From<u8> for ColorId {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => ColorId::Zero,
-            1 => ColorId::One,
-            2 => ColorId::Two,
-            3 => ColorId::Three,
-            _ => panic!("Invalid value for palette: {value} range (0-3)"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum ColorPalette {
-    BPG,
-    OBP0,
-    OBP1,
-}
-
-#[derive(Debug)]
-struct SpriteData {
-    x: u8,
-    y: u8,
-    raw_tile_index: u8,
-    attrs: SpriteAttributes,
-    oam_index: u8,
-}
-
-impl SpriteData {
-    fn new(sprite_index: u8, memory: &mut AddressSpace) -> SpriteData {
-        let sprite_bytes = memory.read_sprite(sprite_index);
-        SpriteData {
-            y: sprite_bytes[0],
-            x: sprite_bytes[1],
-            raw_tile_index: sprite_bytes[2],
-            attrs: SpriteAttributes::new(sprite_bytes[3]),
-            oam_index: sprite_index,
-        }
-    }
-
-    fn wins_prio(&self, other: &Self) -> bool {
-        if self.x == other.x {
-            return self.oam_index < other.oam_index;
-        } else {
-            return self.x < other.x;
-        }
-    }
-    fn cmp (&self, other: &Self) -> Ordering {
-        match self.wins_prio(other) {
-            true => Ordering::Less,
-            false => Ordering::Greater,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct SpriteAttributes {
-    priority: bool,
-    x_flip: bool,
-    y_flip: bool,
-    palette: ColorPalette,
-}
-
-impl SpriteAttributes {
-    fn new(attrs: u8) -> SpriteAttributes {
-        SpriteAttributes {
-            priority: (attrs >> 7) & 1 == 1,
-            x_flip: (attrs >> 5) & 1 == 1,
-            y_flip: (attrs >> 6) & 1 == 1,
-            palette: if (attrs >> 4) & 1 == 1 { ColorPalette::OBP1 } else { ColorPalette::OBP0 },
-        }
-    }
-}
+use crate::sprites::*;
 
 
 #[derive(Debug, PartialEq)]
@@ -129,8 +32,10 @@ pub struct PPU {
     mode: PPUMode,
     tick_i: u64,
     canvas: sdl2::render::Canvas<sdl2::video::Window>,
-    window_y_condition: bool,
+    window_enabled: bool,
     wly: usize,
+    past_lyc: u8,
+    past_lyc_interrupt_line: u8,
 }
 
 impl PPU {
@@ -149,8 +54,10 @@ impl PPU {
             mode: PPUMode::OAMScan,
             tick_i: 0,
             canvas,
-            window_y_condition: false,
+            window_enabled: false,
             wly: 0,
+            past_lyc: 0,
+            past_lyc_interrupt_line: 255,
         }
     }
 
@@ -213,7 +120,8 @@ impl PPU {
         let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
 
         if self.ly == lyc {
-            if interrupt_on_equal_lyc {
+            // New line or LYC write
+            if interrupt_on_equal_lyc && (self.past_lyc != lyc || (self.mode == PPUMode::OAMScan && self.dot == 0)) {
                 return true;
             }
         }
@@ -232,16 +140,26 @@ impl PPU {
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {
         if !self.get_ppu_enabled(memory) {
+            self.mode = PPUMode::HBlank;
+            self.ly = 143;
+            self.dot = 456;
+            memory.unlock_oam();
+            memory.unlock_vram();
             return
         }
         // println!("PPU, dot: {}, ly: {}, mode: {:?}", self.dot, self.ly, self.mode);
-        let stat_irq = self.check_stat_irq(memory);
+        let prev_stat_irq = self.check_stat_irq(memory);
+        let mut stat_irq: Option<bool> = None;
         match self.mode {
             PPUMode::OAMScan => {
-                if self.ly == self.wy(memory) as u8 {
-                    self.window_y_condition = true;
+                if !self.window_enabled && self.ly == self.wy(memory) as u8 && self.window_enabled(memory) {
+                    self.window_enabled = true;
+                    self.wly = 0;
                 }
-
+                if self.dot == 0 {
+                    self.set_ly(memory);
+                    stat_irq = Some(self.check_stat_irq(memory));
+                }
                 if self.dot == 80 {
                     self.mode = PPUMode::Drawing;
                     memory.lock_oam();
@@ -263,6 +181,8 @@ impl PPU {
                             }
                         }
                     }
+                    self.set_ly(memory);
+                    stat_irq = Some(self.check_stat_irq(memory));
                 } else {
                     self.dot += 1;
                 }
@@ -273,6 +193,8 @@ impl PPU {
                     memory.unlock_oam();
                     memory.unlock_vram();
                     self.show(memory);
+                    self.set_ly(memory);
+                    stat_irq = Some(self.check_stat_irq(memory));
                 }
                 self.dot += 1;
             },
@@ -285,13 +207,15 @@ impl PPU {
                         memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
                     } else { 
-                        if self.window_y_condition {
+                        if self.window_enabled {
                             self.wly += 1;
                         }
                         self.mode = PPUMode::OAMScan;
                         self.line_objects.clear();
                         memory.lock_oam();
                     };
+                    self.set_ly(memory);
+                    stat_irq = Some(self.check_stat_irq(memory));
                 } else {
                     self.dot += 1;
                 }
@@ -307,15 +231,16 @@ impl PPU {
                     self.ly = 0; 
                     self.mode = PPUMode::OAMScan;
                     self.line_objects.clear();
-                    self.window_y_condition = false;
+                    self.window_enabled = false;
                     self.wly = 0;
                     memory.lock_oam();
+                    self.set_ly(memory);
+                    stat_irq = Some(self.check_stat_irq(memory));
                 };
             },
         };
-
-    self.set_ly(memory);
-    if !stat_irq && self.check_stat_irq(memory) {
+    
+    if !prev_stat_irq && stat_irq.unwrap_or(prev_stat_irq) {
         memory.request_interrupt(Interrupt::LCD);
     }
 
@@ -323,16 +248,18 @@ impl PPU {
     self.tick_i += 1
     }
 
-    fn set_ly(&self, memory: &mut AddressSpace) {
+    fn set_ly(&mut self, memory: &mut AddressSpace) {
         memory.write(LCDY_ADDR, self.ly);
         let lyc = memory.read(LYC_ADDR);
         
         let mut value = memory.read(STAT_ADDR);
 
-        if self.ly == lyc {
-            value = value | (1 << 2);
-        } else {
-            value = value & (0xFF ^ (1 << 2));
+        if self.past_lyc != lyc || (self.mode == PPUMode::OAMScan && self.dot == 0) {
+            if self.ly == lyc {
+                value = value | (1 << 2);
+            } else {
+                value = value & (0xFF ^ (1 << 2));
+            }
         }
         memory.write(STAT_ADDR, value);
 
@@ -502,7 +429,6 @@ impl PPU {
         let obp1_palette = make_palette(OBP1);
 
         // let window_x_condition = self.wx(memory) <= 166;
-        let ayy = self.window_y_condition;
         let win_x = self.wx(memory);
         let lcd_enabled = self.get_bg_win_display(memory);
         let win_enabled = (memory.read(LCDC_ADDR) >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
@@ -516,7 +442,7 @@ impl PPU {
 
         for i in 0..SCREEN_WIDTH {
             let bg_color: u8;
-            if self.window_y_condition && i + 7 >= win_x && self.window_enabled(memory) {
+            if self.window_enabled && i + 7 >= win_x {
                 let src_row = self.wly;
                 let tile_y = src_row / 8;
                 let tile_offset_y = src_row % 8;
