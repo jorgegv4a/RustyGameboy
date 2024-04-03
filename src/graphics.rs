@@ -32,10 +32,11 @@ pub struct PPU {
     mode: PPUMode,
     tick_i: u64,
     canvas: sdl2::render::Canvas<sdl2::video::Window>,
-    window_enabled: bool,
+    render_window_on_cur_frame: bool,
     wly: usize,
-    past_lyc: u8,
-    past_lyc_interrupt_line: u8,
+    stat_flag: bool,
+    past_cycle_disabled: bool,
+    frame_start_t: Instant,
 }
 
 impl PPU {
@@ -54,10 +55,11 @@ impl PPU {
             mode: PPUMode::OAMScan,
             tick_i: 0,
             canvas,
-            window_enabled: false,
+            render_window_on_cur_frame: false,
             wly: 0,
-            past_lyc: 0,
-            past_lyc_interrupt_line: 255,
+            past_cycle_disabled: true,
+            frame_start_t: Instant::now(),
+            stat_flag: false,
         }
     }
 
@@ -119,46 +121,72 @@ impl PPU {
         let mut value = memory.read(STAT_ADDR);
         let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
 
-        if self.ly == lyc {
-            // New line or LYC write
-            if interrupt_on_equal_lyc && (self.past_lyc != lyc || (self.mode == PPUMode::OAMScan && self.dot == 0)) {
+        if (value >> 2) & 1 == 1 && interrupt_on_equal_lyc {
+                // print!("\rLY == LYC on line {}, dot: {}", self.ly, self.dot);
                 return true;
-            }
         }
-        let stat_modes = self.get_stat_mode(memory);
-        if stat_modes & 1 == 1 && self.mode == PPUMode::VBlank {
+        if (value >> 3) & 1 == 1 && self.mode == PPUMode::VBlank {
             return true;
-        } else if (stat_modes >> 1) & 1 == 1 && self.mode == PPUMode::HBlank {
+        } else if (value >> 4) & 1 == 1 && self.mode == PPUMode::HBlank {
             return true;
-        } else if (stat_modes >> 2) & 1 == 1 && self.mode == PPUMode::OAMScan {
+        } else if (value >> 5) & 1 == 1 && self.mode == PPUMode::OAMScan {
             return true;
         } else {
             return false;
         }
-        // memory.request_interrupt(Interrupt::LCD)
     }
+    
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {
         if !self.get_ppu_enabled(memory) {
             self.mode = PPUMode::HBlank;
-            self.ly = 143;
-            self.dot = 456;
+            self.stat_flag = false;
+            memory.ppu_write_LY(0);
             memory.unlock_oam();
             memory.unlock_vram();
+            self.past_cycle_disabled = true;
             return
         }
-        // println!("PPU, dot: {}, ly: {}, mode: {:?}", self.dot, self.ly, self.mode);
-        let prev_stat_irq = self.check_stat_irq(memory);
-        let mut stat_irq: Option<bool> = None;
+        /*
+        Conditions for STAT IRQ to enable:
+            LY == LYC
+            Any of the modes matches enabled mode
+        
+        Actions that could modify STAT IRQ:
+            - LY updates
+            - LYC writes
+            - Mode changes
+            - Enabled mode changes
+
+        Condition for STAT IRQ Interrupt:
+            - STAT IRQ transition from low to high
+         */
+        if self.past_cycle_disabled {
+            self.ly = 0;
+            self.dot = 0;
+            self.mode = PPUMode::OAMScan;
+            memory.lock_oam();
+            memory.ppu_write_LY(self.ly);
+            self.past_cycle_disabled = false;
+        }
         match self.mode {
             PPUMode::OAMScan => {
-                if !self.window_enabled && self.ly == self.wy(memory) as u8 && self.window_enabled(memory) {
-                    self.window_enabled = true;
+                if !self.render_window_on_cur_frame && self.ly == self.wy(memory) as u8 && self.window_enabled(memory) {
+                    self.render_window_on_cur_frame = true;
                     self.wly = 0;
                 }
                 if self.dot == 0 {
-                    self.set_ly(memory);
-                    stat_irq = Some(self.check_stat_irq(memory));
+                    memory.ppu_write_LY(self.ly);
+                    if self.ly == 0 {
+                        let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
+                        let fps = 1.0 / frame_time_seconds;
+                        if frame_time_seconds < 1.0 / 60.0 {
+                            let diff = 1.0 / 60.0 - frame_time_seconds;
+                            std::thread::sleep(std::time::Duration::from_secs_f64(diff));
+                        }
+                        // println!("Frame time: {:.3} ms, FPS: {fps:.1}", frame_time_seconds * 1000.0);
+                        self.frame_start_t = Instant::now();
+                    }
                 }
                 if self.dot == 80 {
                     self.mode = PPUMode::Drawing;
@@ -181,8 +209,6 @@ impl PPU {
                             }
                         }
                     }
-                    self.set_ly(memory);
-                    stat_irq = Some(self.check_stat_irq(memory));
                 } else {
                     self.dot += 1;
                 }
@@ -193,8 +219,6 @@ impl PPU {
                     memory.unlock_oam();
                     memory.unlock_vram();
                     self.show(memory);
-                    self.set_ly(memory);
-                    stat_irq = Some(self.check_stat_irq(memory));
                 }
                 self.dot += 1;
             },
@@ -202,20 +226,19 @@ impl PPU {
                 if self.dot == 456 { 
                     self.dot = 0; 
                     self.ly += 1; 
-                    if self.ly >= 144 { 
+                    if self.ly == 144 { 
                         self.mode = PPUMode::VBlank;
                         memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
                     } else { 
-                        if self.window_enabled {
+                        if self.render_window_on_cur_frame {
                             self.wly += 1;
                         }
                         self.mode = PPUMode::OAMScan;
                         self.line_objects.clear();
                         memory.lock_oam();
                     };
-                    self.set_ly(memory);
-                    stat_irq = Some(self.check_stat_irq(memory));
+                    memory.ppu_write_LY(self.ly);
                 } else {
                     self.dot += 1;
                 }
@@ -224,44 +247,53 @@ impl PPU {
                 if self.dot == 456 { 
                     self.dot = 0; 
                     self.ly += 1; 
+                    memory.ppu_write_LY(self.ly);
                 } else {
                     self.dot += 1;
                 }
-                if self.ly == 154 { 
+                if self.ly == 153 { 
                     self.ly = 0; 
                     self.mode = PPUMode::OAMScan;
                     self.line_objects.clear();
-                    self.window_enabled = false;
+                    self.render_window_on_cur_frame = false;
                     self.wly = 0;
                     memory.lock_oam();
-                    self.set_ly(memory);
-                    stat_irq = Some(self.check_stat_irq(memory));
+                    memory.ppu_write_LY(self.ly);
                 };
             },
         };
-    
-    if !prev_stat_irq && stat_irq.unwrap_or(prev_stat_irq) {
+    self.update_stat(memory);
+    if !self.stat_flag && self.check_stat_irq(memory) {
         memory.request_interrupt(Interrupt::LCD);
+        println!("{}, {}, {:08b}, {:?}", self.ly, memory.read(LYC_ADDR), memory.read(STAT_ADDR), self.mode);
+    } else {
+        // println!("\r");
     }
-
-    // self.show(memory);
+    self.stat_flag = self.check_stat_irq(memory);
     self.tick_i += 1
     }
 
-    fn set_ly(&mut self, memory: &mut AddressSpace) {
-        memory.write(LCDY_ADDR, self.ly);
-        let lyc = memory.read(LYC_ADDR);
-        
+    fn update_stat(&mut self, memory: &mut AddressSpace) {
+        memory.ppu_write_LY(self.ly);
         let mut value = memory.read(STAT_ADDR);
 
-        if self.past_lyc != lyc || (self.mode == PPUMode::OAMScan && self.dot == 0) {
-            if self.ly == lyc {
-                value = value | (1 << 2);
-            } else {
-                value = value & (0xFF ^ (1 << 2));
-            }
+        if (value >> 3) & 1 == 1 && self.mode == PPUMode::VBlank {
+            value |= 1 << 3;
+        } else {
+            value &= 0xFF ^ (1 << 3);
         }
-        memory.write(STAT_ADDR, value);
+        if (value >> 4) & 1 == 1 && self.mode == PPUMode::HBlank {
+            value |= 1 << 4;
+        } else {
+            value &= 0xFF ^ (1 << 4);
+        }
+        if (value >> 5) & 1 == 1 && self.mode == PPUMode::OAMScan {
+            value |= 1 << 5;
+        } else {
+            value &= 0xFF ^ (1 << 5);
+        }
+
+        memory.ppu_write_stat(value);
 
     }
 
@@ -325,82 +357,7 @@ impl PPU {
         tile
     }
 
-    // fn show_bg(&mut self, memory: &AddressSpace) {
-    //     if self.tick_i % 70224 == 0 {
-    //         let t0 = Instant::now();
-    //         let mut full_image = [[ColorId; 256]; 256];
-    //         let (bg_map, unique_tiles) = self.get_background_tile_map(memory);
-    //         let mut tiles: HashMap<u16, [[ColorId; 8]; 8]> = HashMap::new();
-    //         for tile in unique_tiles {
-    //             tiles.insert(tile, self.get_tile(memory, tile));
-    //         }
-
-    //         for j in 0..32 {
-    //             let tile_y0 = j * 8;
-    //             for i in 0..32 {
-    //                 let tile_x0 = i * 8;
-    //                 let tile_idx = &bg_map[j][i];
-    //                 // full_image[tile_y0..tile_y0 + 8][tile_x0..tile_x0 + 8] = tiles[tile_idx];
-    //                 for y in 0..8 {
-    //                     for x in 0..8 {
-    //                         full_image[tile_y0 + y][tile_x0 + x] = tiles[tile_idx][y][x];
-    //                     }
-    //                 }
-    //             }
-    //         }
-
-    //         self.canvas.clear();
-
-    //         let view_y0 = self.scy(memory);
-    //         let view_x0 = self.scx(memory);
-
-    //         let margin_x = 255 - view_x0;
-    //         let margin_y = 255 - view_y0;
-
-    //         let fit_x = min(SCREEN_WIDTH, margin_x);
-    //         let fit_y = min(SCREEN_HEIGHT, margin_y);
-
-    //         // for j in 0..256 as i32 {
-    //         //     for i in 0..256 as i32 {
-    //         //         let color = full_image[j as usize][i as usize];
-    //         //         self.canvas.set_draw_color(Color::RGB(color, color, color));
-    //         //         self.canvas.draw_point(Point::new(i, j)).unwrap();
-    //         //     }
-    //         // }
-
-    //         for j in 0..SCREEN_HEIGHT {
-    //             let src_row;
-    //             if j < fit_y {
-    //                 src_row = full_image[view_y0 + j as usize];
-    //             } else {
-    //                 src_row = full_image[margin_y + j as usize];
-    //             }
-    //             for i in 0..SCREEN_WIDTH {
-    //                 let color;
-    //                 if i < fit_x {
-    //                     color = src_row[view_x0 + i as usize];
-    //                 } else {
-    //                     color = src_row[margin_x + i as usize];
-    //                 }
-    //                 self.canvas.set_draw_color(Color::RGB(color, color, color));
-    //                 self.canvas.draw_point(Point::new(i as i32, j as i32)).unwrap();
-    //             }
-    //         }
-
-    //         self.canvas.present();
-
-
-    //         // self.canvas.set_draw_color(Color::RGB(random(), random(), random()));
-    //         // self.canvas.clear();
-    //         // self.canvas.present();
-    //         println!("Frame time: {}", t0.elapsed().as_millis());
-    //     }
-    // }
-
     fn show(&mut self, memory: &AddressSpace) {
-        let t0 = Instant::now();
-        let mut t1 = Instant::now();
-        
         let line_j = self.ly as usize;
 
         let view_y0 = self.scy(memory);
@@ -434,15 +391,15 @@ impl PPU {
         let win_enabled = (memory.read(LCDC_ADDR) >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
         let all_enabled = lcd_enabled && win_enabled;
         if all_enabled {
-            println!();
+            // println!();
         }
         if !lcd_enabled {
-            println!();
+            // println!();
         }
 
         for i in 0..SCREEN_WIDTH {
             let bg_color: u8;
-            if self.window_enabled && i + 7 >= win_x {
+            if self.render_window_on_cur_frame && i + 7 >= win_x {
                 let src_row = self.wly;
                 let tile_y = src_row / 8;
                 let tile_offset_y = src_row % 8;
@@ -574,11 +531,7 @@ impl PPU {
             self.canvas.draw_point(Point::new(i as i32, line_j as i32)).unwrap();
         }
 
-        println!("Draw line: {}", t1.elapsed().as_micros());
-        t1 = Instant::now();
         self.canvas.present();
-        println!("Present line: {}", t1.elapsed().as_micros());
-        println!("Frame time: {}\n", t0.elapsed().as_micros());
     }
 }
 

@@ -41,3 +41,11 @@ pub const IF_ADDR: u16 = 0xFF0F;
 pub const IE_ADDR: u16 = 0xFFFF;
 
 pub const JOYP_ADDR: u16 = 0xFF00;
+
+pub const DIV_ADDR: u16 = 0xFF04;
+pub const TIMA_ADDR: u16 = 0xFF05;
+pub const TMA_ADDR: u16 = 0xFF06;
+pub const TAC_ADDR: u16 = 0xFF07;
+
+pub const DMA_ADDR: u16 = 0xFF46;
+

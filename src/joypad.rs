@@ -96,12 +96,16 @@ impl Joypad {
         }
     }
 
-    pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
+    pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) -> bool {
         self.ticks += nticks as u64;
         if self.ticks >= 7022 {
             self.ticks = self.ticks % 7022;
             self.update_state(memory);
             self.update_memory(memory);
         }
+        if self.ticks % 1e6 as u64 == 0 && self.device_state.get_keys().contains(&Keycode::Escape) {
+            return true;
+        }
+        return false;
     }
 }

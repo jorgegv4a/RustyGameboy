@@ -7,7 +7,7 @@ use crate::opcodes::{get_opcodes, Opcode};
 use serde_json::Value;
 
 pub const DEBUG: bool = false;
-// const DEBUG: bool = true;
+// pub const DEBUG: bool = true;
 
 #[derive(Debug)]
 enum SingleDataLoc {
@@ -66,8 +66,10 @@ pub struct CPU {
     pub registers: RegisterBank,
     // pub memory: AddressSpace,
     pub master_interrupt_enable: bool,
+    pub enable_interrupts_next_instr: bool,
     clock: u64,
     opcodes: Value,
+    halted: bool,
 }
 
 fn bytes_to_u16(extra_bytes: Vec<u8>) -> u16 {
@@ -89,12 +91,23 @@ impl CPU {
             registers: RegisterBank::new(),
             // memory: AddressSpace::new(),
             master_interrupt_enable: false,
+            enable_interrupts_next_instr: false,
             clock: 0,
             opcodes: match get_opcodes() {
                 Ok(x) => x,
                 Err(x) => panic!("Couldn't load opcodes: {}", x),
             },
+            halted: false,
         }
+    }
+
+    pub fn is_halted(&self) -> bool {
+        return self.halted;
+    }
+
+    pub fn quit_halt(&mut self) {
+        self.halted = false;
+        self.registers.increment_PC();
     }
 
     pub fn tick(&mut self, nticks: u8) {
@@ -304,7 +317,15 @@ impl CPU {
                 if DEBUG {
                     println!("> EI");
                 }
-                self.master_interrupt_enable = true; // TODO: should be done after the next cycle, not immediately
+                // self.master_interrupt_enable = true; // TODO: should be done after the next cycle, not immediately
+                self.enable_interrupts_next_instr = true;
+            } else if opcode == 0x76 {
+                if DEBUG {
+                    println!("> HALT");
+                    self.halted = true;
+                }
+            } else {
+                panic!("Unimplemented opcode: {:#06X}", opcode);
             }
         } else if opcode & 0xFF00 == 0xCB00 {
             let low_opcode = (opcode & 0xFF) as u8;
@@ -937,7 +958,8 @@ impl CPU {
             if DEBUG {
                 println!("> RETI");
             }
-            self.master_interrupt_enable = true;
+            // self.master_interrupt_enable = true;
+            self.enable_interrupts_next_instr = true;
         } else {
             if DEBUG {
                 println!("> RET");

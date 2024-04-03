@@ -2,6 +2,10 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
+use sdl2::EventPump;
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+
 use crate::constants::{IF_ADDR, IE_ADDR, SB_ADDR, SC_ADDR};
 use crate::cpu::{CPU, DEBUG};
 use crate::memory::{AddressSpace, Cartridge};
@@ -14,17 +18,20 @@ pub struct Gameboy {
     memory: AddressSpace,
     ppu: PPU,
     joypad: Joypad,
+    events: EventPump,
 }
 
 impl Gameboy {
     pub fn new() -> Gameboy {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
+        let mut event_pump = sdl_context.event_pump().unwrap();
         Gameboy {
             cpu: CPU::new(),
             memory: AddressSpace::new(),
             ppu: PPU::new(video_subsystem),
             joypad: Joypad::new(),
+            events: event_pump,
         }
     }
 
@@ -44,7 +51,7 @@ impl Gameboy {
     fn check_interrupts(&self) -> Option<Interrupt> {
         let interrupt_flags = self.memory.read(IF_ADDR);
         let interrupt_enables = self.memory.read(IE_ADDR);
-        if !self.cpu.master_interrupt_enable || interrupt_flags == 0 || interrupt_enables == 0 {
+        if interrupt_flags == 0 || interrupt_enables == 0 {
             return None
         }
 
@@ -74,8 +81,21 @@ impl Gameboy {
             if DEBUG {
                 println!("{}", self.cpu);
             }
+            if self.cpu.enable_interrupts_next_instr {
+                self.cpu.master_interrupt_enable = true;
+                self.cpu.enable_interrupts_next_instr = false;
+            }
             if let Some(interrupt) = self.check_interrupts() {
-                self.serve_interrupt(interrupt);
+                if self.cpu.master_interrupt_enable {
+                    if self.cpu.is_halted() {
+                        self.cpu.quit_halt();
+                    }
+                    self.serve_interrupt(interrupt);
+                } else {
+                    if self.cpu.is_halted() {
+                        self.cpu.quit_halt();
+                    }
+                }
             }
 
             let opcode_byte = self.cpu.fetch(&self.memory);
@@ -84,7 +104,7 @@ impl Gameboy {
             
             self.cpu.tick(nticks);
             self.ppu.tick(nticks, &mut self.memory);
-            self.joypad.tick(nticks, &mut self.memory);
+            let quit = self.joypad.tick(nticks, &mut self.memory);
             self.memory.tick(nticks);
             if self.memory.read(SC_ADDR) == 0x81 {
                 if !DEBUG {
@@ -92,7 +112,19 @@ impl Gameboy {
                 }
                 self.memory.write(SC_ADDR, 0);
             }
-
+            if quit {
+                return;
+            }
+            // for event in self.events.poll_iter() {
+            //     match event {
+            //         Event::Quit { .. }
+            //         | Event::KeyDown {
+            //             keycode: Some(Keycode::Escape),
+            //             ..
+            //         } => return,
+            //         _ => {}
+            //     }
+            // }
         }
     }
 }
