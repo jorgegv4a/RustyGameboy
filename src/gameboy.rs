@@ -45,7 +45,7 @@ impl Gameboy {
             Err(er) => panic!("Error found: '{}'", er),
             Ok(file) => file,
         };
-        self.memory.load_rom(buf, Cartridge::RomOnly);
+        self.memory.load_rom(buf);
     }
 
     fn check_interrupts(&self) -> Option<Interrupt> {
@@ -102,8 +102,8 @@ impl Gameboy {
             let (opcode_dict, opcode) = self.cpu.decode(opcode_byte, &self.memory);
             let nticks = self.cpu.execute(opcode, opcode_dict, &mut self.memory);
             
-            self.cpu.tick(nticks);
             self.ppu.tick(nticks, &mut self.memory);
+            self.cpu.tick(nticks);
             let quit = self.joypad.tick(nticks, &mut self.memory);
             self.memory.tick(nticks);
             if self.memory.read(SC_ADDR) == 0x81 {

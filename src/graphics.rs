@@ -37,6 +37,7 @@ pub struct PPU {
     stat_flag: bool,
     past_cycle_disabled: bool,
     frame_start_t: Instant,
+    past_tick_lyc: Option<u8>,
 }
 
 impl PPU {
@@ -57,9 +58,10 @@ impl PPU {
             canvas,
             render_window_on_cur_frame: false,
             wly: 0,
-            past_cycle_disabled: true,
+            past_cycle_disabled: false,
             frame_start_t: Instant::now(),
             stat_flag: false,
+            past_tick_lyc: None,
         }
     }
 
@@ -112,7 +114,10 @@ impl PPU {
     }
 
     fn window_enabled(&self, memory: &AddressSpace) -> bool {
-        return self.get_bg_win_display(memory) && (memory.read(LCDC_ADDR) >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
+        let lcdc = memory.read(LCDC_ADDR);
+        let win_en = (lcdc >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
+        let win_gb_en = self.get_bg_win_display(memory);
+        return win_en && win_gb_en;
     }
 
     fn check_stat_irq(&self, memory: &AddressSpace) -> bool {
@@ -139,11 +144,11 @@ impl PPU {
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {
         if !self.get_ppu_enabled(memory) {
-            self.mode = PPUMode::HBlank;
+            // self.mode = PPUMode::HBlank;
             self.stat_flag = false;
-            memory.ppu_write_LY(0);
-            memory.unlock_oam();
-            memory.unlock_vram();
+            // memory.ppu_write_LY(0);
+            // memory.unlock_oam();
+            // memory.unlock_vram();
             self.past_cycle_disabled = true;
             return
         }
@@ -166,8 +171,15 @@ impl PPU {
             self.dot = 0;
             self.mode = PPUMode::OAMScan;
             memory.lock_oam();
-            memory.ppu_write_LY(self.ly);
+            memory.ppu_write_LY_update_STAT(self.ly);
+            // memory.ppu_write_LY(self.ly);
             self.past_cycle_disabled = false;
+        }
+        let lyc = memory.read(LYC_ADDR);
+        if let Some(x) = self.past_tick_lyc {
+            if x != lyc {
+                memory.ppu_write_LY_update_STAT(self.ly)
+            }
         }
         match self.mode {
             PPUMode::OAMScan => {
@@ -176,7 +188,7 @@ impl PPU {
                     self.wly = 0;
                 }
                 if self.dot == 0 {
-                    memory.ppu_write_LY(self.ly);
+                    memory.ppu_write_LY_update_STAT(self.ly);
                     if self.ly == 0 {
                         let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
                         let fps = 1.0 / frame_time_seconds;
@@ -231,14 +243,14 @@ impl PPU {
                         memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
                     } else { 
-                        if self.render_window_on_cur_frame {
+                        if self.render_window_on_cur_frame && self.wx(memory) <= 166 {
                             self.wly += 1;
                         }
                         self.mode = PPUMode::OAMScan;
                         self.line_objects.clear();
                         memory.lock_oam();
                     };
-                    memory.ppu_write_LY(self.ly);
+                    memory.ppu_write_LY_update_STAT(self.ly);
                 } else {
                     self.dot += 1;
                 }
@@ -247,7 +259,7 @@ impl PPU {
                 if self.dot == 456 { 
                     self.dot = 0; 
                     self.ly += 1; 
-                    memory.ppu_write_LY(self.ly);
+                    memory.ppu_write_LY_update_STAT(self.ly);
                 } else {
                     self.dot += 1;
                 }
@@ -258,7 +270,7 @@ impl PPU {
                     self.render_window_on_cur_frame = false;
                     self.wly = 0;
                     memory.lock_oam();
-                    memory.ppu_write_LY(self.ly);
+                    memory.ppu_write_LY_update_STAT(self.ly);
                 };
             },
         };
@@ -270,11 +282,12 @@ impl PPU {
         // println!("\r");
     }
     self.stat_flag = self.check_stat_irq(memory);
+    self.past_tick_lyc = Some(lyc);
     self.tick_i += 1
     }
 
     fn update_stat(&mut self, memory: &mut AddressSpace) {
-        memory.ppu_write_LY(self.ly);
+        memory.ppu_write_LY_update_STAT(self.ly);
         let mut value = memory.read(STAT_ADDR);
 
         if (value >> 3) & 1 == 1 && self.mode == PPUMode::VBlank {
@@ -360,15 +373,6 @@ impl PPU {
     fn show(&mut self, memory: &AddressSpace) {
         let line_j = self.ly as usize;
 
-        let view_y0 = self.scy(memory);
-        let view_x0 = self.scx(memory);
-
-        let margin_x = 255 - view_x0;
-        let margin_y = 255 - view_y0;
-
-        let fit_x = min(SCREEN_WIDTH, margin_x);
-        let fit_y = min(SCREEN_HEIGHT, margin_y);
-
         let bg_tile_map_base_address: u16 = if self.get_bg_tile_map(memory) { 0x9C00 } else { 0x9800 };
         let win_tile_map_base_address: u16 = if self.get_win_tile_map(memory) { 0x9C00 } else { 0x9800 };
         let direct_data_zone = self.get_bg_win_tile_data_zone(memory);
@@ -387,19 +391,21 @@ impl PPU {
 
         // let window_x_condition = self.wx(memory) <= 166;
         let win_x = self.wx(memory);
-        let lcd_enabled = self.get_bg_win_display(memory);
         let win_enabled = (memory.read(LCDC_ADDR) >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
-        let all_enabled = lcd_enabled && win_enabled;
-        if all_enabled {
-            // println!();
-        }
-        if !lcd_enabled {
-            // println!();
-        }
+
+        let view_y0 = self.scy(memory);
+        let view_x0 = self.scx(memory);
+
+
+        let margin_x = 256 - view_x0;
+        let margin_y = 256 - view_y0;
+
+        let fit_x = min(SCREEN_WIDTH, margin_x);
+        let fit_y = min(SCREEN_HEIGHT, margin_y);
 
         for i in 0..SCREEN_WIDTH {
             let bg_color: u8;
-            if self.render_window_on_cur_frame && i + 7 >= win_x {
+            if self.render_window_on_cur_frame && i + 7 >= win_x && win_enabled {
                 let src_row = self.wly;
                 let tile_y = src_row / 8;
                 let tile_offset_y = src_row % 8;
@@ -413,7 +419,11 @@ impl PPU {
                 let tile_idx: u16 = if direct_data_zone {
                     0x8000 + tile_offset * 16
                 } else {
-                    (0x8800 + ((tile_offset as i32) - 128) * 16) as u16
+                    if tile_offset > 127 {
+                        0x8000 + tile_offset * 16
+                    } else {
+                        0x9000 + tile_offset * 16
+                    }  
                 };
                 let tile = self.get_tile(memory, tile_idx);
                 bg_color = tile[tile_offset_y][tile_offset_x];
@@ -422,7 +432,7 @@ impl PPU {
                 if line_j < fit_y {
                     src_row = view_y0 + line_j;
                 } else {
-                    src_row = margin_y + line_j;
+                    src_row = line_j - fit_y;
                 }
                 let tile_y = src_row / 8;
                 let tile_offset_y = src_row % 8;
@@ -431,7 +441,7 @@ impl PPU {
                 if i < fit_x {
                     src_col = view_x0 + i;
                 } else {
-                    src_col = margin_x + i;
+                    src_col = i - fit_x;
                 }
                 let tile_x = src_col / 8;
                 let tile_offset_x = src_col % 8;
@@ -441,7 +451,11 @@ impl PPU {
                 let tile_idx: u16 = if direct_data_zone {
                     0x8000 + tile_offset * 16
                 } else {
-                    (0x8800 + ((tile_offset as i32) - 128) * 16) as u16
+                    if tile_offset > 127 {
+                        0x8000 + tile_offset * 16
+                    } else {
+                        0x9000 + tile_offset * 16
+                    }
                 };
                 let tile = self.get_tile(memory, tile_idx);
                 bg_color = tile[tile_offset_y][tile_offset_x];

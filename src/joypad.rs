@@ -67,7 +67,6 @@ impl Joypad {
         }
 
         if keys.contains(&Keycode::Enter) {
-            println!("Enter");
             self.state &= (1 << 4) ^ 0xFF;
         } else {
             self.state |= 1 << 4;

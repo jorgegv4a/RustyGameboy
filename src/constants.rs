@@ -23,8 +23,8 @@ pub const LCDC_PPU_ENABLE_BIT: u8 = 7;
 pub const LCDC_ADDR: u16 = 0xFF40;
 pub const SCX_ADDR: u16 = 0xFF43;
 pub const SCY_ADDR: u16 = 0xFF42;
-pub const WX_ADDR: u16 = 0xFF4A;
-pub const WY_ADDR: u16 = 0xFF4B;
+pub const WX_ADDR: u16 = 0xFF4B;
+pub const WY_ADDR: u16 = 0xFF4A;
 
 pub const BGP_ADDR: u16 = 0xFF47;
 pub const OBP0_ADDR: u16 = 0xFF48;
