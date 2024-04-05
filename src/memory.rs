@@ -248,7 +248,11 @@ impl AddressSpace {
             idx @ 0xFF00..=0xFF4B => 
             {
                 if idx == DMA_ADDR {
-                    self.dma_start_address = 0x100 * value as i32
+                    if self.dma_start_address >= 0 {
+                        ();
+                    } else {
+                        self.dma_start_address = (0x100 * value as u16) as i32;
+                    }
                 } else if idx == JOYP_ADDR {
                     self.standard_io[0] = (value & 0xF0) | (self.standard_io[0] & 0xF)
                 } else if idx == STAT_ADDR {
@@ -339,9 +343,10 @@ impl AddressSpace {
         if self.dma_start_address < 0 {
             return
         }
-        let oam_index = (self.dma_clock_t / 4) as usize;
-        let mem_address = (self.dma_start_address as u16) + self.dma_clock_t / 4;
+        let oam_index = (self.dma_clock_t) as usize;
+        let mem_address = (self.dma_start_address as u16) + self.dma_clock_t;
         self.oam[oam_index] = self.read(mem_address);
+        // println!("DMA step, clock {} -> offset: {}, base: ${:04X} -> oam[${oam_index:02X}] = self.read(${mem_address:04X}) = ${:02X}", self.dma_clock_t, self.dma_clock_t / 4, self.dma_start_address, self.oam[oam_index]);
         self.dma_clock_t += 1;
         if self.dma_clock_t >= 0xA0 {
             self.dma_clock_t = 0;

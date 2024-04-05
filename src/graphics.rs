@@ -202,8 +202,6 @@ impl PPU {
                 }
                 if self.dot == 80 {
                     self.mode = PPUMode::Drawing;
-                    memory.lock_oam();
-                    memory.lock_vram();
 
                     let sprite_height: u8 = if self.get_obj_size(memory) == false {8} else {16};
                     let sprites_disabled = !self.get_obj_enabled(memory);
@@ -226,6 +224,10 @@ impl PPU {
                 }
             },
             PPUMode::Drawing => {
+                if self.dot == 80 {
+                    // memory.lock_oam();
+                    // memory.lock_vram();
+                }
                 if self.dot == 80 + 172 { 
                     self.mode = PPUMode::HBlank;
                     memory.unlock_oam();
@@ -248,7 +250,7 @@ impl PPU {
                         }
                         self.mode = PPUMode::OAMScan;
                         self.line_objects.clear();
-                        memory.lock_oam();
+                        // memory.lock_oam();
                     };
                     memory.ppu_write_LY_update_STAT(self.ly);
                 } else {
@@ -269,7 +271,7 @@ impl PPU {
                     self.line_objects.clear();
                     self.render_window_on_cur_frame = false;
                     self.wly = 0;
-                    memory.lock_oam();
+                    // memory.lock_oam();
                     memory.ppu_write_LY_update_STAT(self.ly);
                 };
             },
