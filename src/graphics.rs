@@ -131,7 +131,7 @@ impl PPU {
         } else {
             return false;
         }
-    }
+    } 
     
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {

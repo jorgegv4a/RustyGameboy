@@ -56,6 +56,7 @@ pub struct AddressSpace {
     bank_mode_register: u8,
     external_ram_enable: bool,
     num_rom_banks: usize,
+    num_ram_banks: usize,
 }
 
 impl AddressSpace {
@@ -81,11 +82,12 @@ impl AddressSpace {
             internal_div: 0,
             past_tick_tima_enabled: false,
             clock: 0,
-            rom_select_register: 0,
+            rom_select_register: 1,
             ram_select_register: 0,
             bank_mode_register: 0,
-            external_ram_enable: true,
+            external_ram_enable: false,
             num_rom_banks: 0,
+            num_ram_banks: 0,
             
         }
     }
@@ -116,7 +118,7 @@ impl AddressSpace {
         }
 
         let ram_banks_code = rom_bytes[0x149];
-        let num_ram_banks = match ram_banks_code {
+        self.num_ram_banks = match ram_banks_code {
             0x00 => 0,
             0x01 => panic!("Unused ram code found"),
             0x02 => 1,
@@ -125,13 +127,13 @@ impl AddressSpace {
             0x05 => 8,
             _ => unreachable!("Invalid ram bank code found: {ram_banks_code}"),
         };
-        let ram_size = num_ram_banks * CARTRIDGE_RAM_SIZE;
-        println!("Rom with {num_ram_banks} banks, total {ram_size} KB");
+        let ram_size = self.num_ram_banks * CARTRIDGE_RAM_SIZE;
+        println!("Ram with {} banks, total {ram_size} KB", self.num_ram_banks);
         
         self.ram_bank.resize(ram_size, 0);
 
         self.rom_bank.extend_from_slice(&rom_bytes[..GB_ROM_BANK_SIZE]);
-        self.active_rom_bank.extend_from_slice(&rom_bytes[GB_ROM_BANK_SIZE..2*GB_ROM_BANK_SIZE]);
+        self.active_rom_bank.extend_from_slice(&rom_bytes[GB_ROM_BANK_SIZE..self.num_rom_banks*GB_ROM_BANK_SIZE]);
         self.raw_game_rom = rom_bytes.clone();
 
         if let Ok(title) = String::from_utf8(rom_bytes[0x134..0x144].to_vec()) {
@@ -145,24 +147,25 @@ impl AddressSpace {
     pub fn read(&self, index: u16) -> u8 {
         let value = match index {
             0..=0x3FFF => {
-                if self.num_rom_banks == 2 {
-                    self.rom_bank[index as usize]
-                } else {
-                    let full_index = match self.bank_mode_register {
-                        0 => index as usize,
-                        1 => ((self.ram_select_register as usize) << 19) | (index & 0x3FFF) as usize,
-                        _ => unreachable!("Invalid bank mode encountered when indexing rom: {}", self.bank_mode_register),
-                    };
-                    self.rom_bank[full_index]
+                if self.num_rom_banks <= 32 || self.bank_mode_register == 0 {
+                    return self.rom_bank[index as usize];
                 }
+                let bank_number = (self.ram_select_register << 5) as usize;
+                let bank_offset = (bank_number - 1) * 0x4000;
+                self.active_rom_bank[bank_offset + index as usize]
             },
             0x4000..=0x7FFF => {
-                if self.num_rom_banks == 2 {
-                    self.active_rom_bank[index as usize - 0x4000]
+                let bank_number;
+                if self.num_rom_banks <= 32 {
+                    bank_number = self.rom_select_register as usize;
+                    if bank_number == 0 {
+                        return self.rom_bank[index as usize - 0x4000]
+                    }
                 } else {
-                    let full_index = ((self.ram_select_register as usize) << 19) | ((self.rom_select_register as usize) << 14) | (index & 0x3FFF) as usize;
-                    self.active_rom_bank[full_index - 0x4000]
+                    bank_number = (self.ram_select_register << 5) as usize | self.rom_select_register as usize;
                 }
+                let bank_offset = (bank_number - 1) * 0x4000;
+                self.active_rom_bank[bank_offset + index as usize - 0x4000]
             },
             0x8000..=0x9FFF => if self.vram_writeable {
                 self.vram[index as usize - 0x8000]
@@ -170,14 +173,15 @@ impl AddressSpace {
                 0xFF
             },
             0xA000..=0xBFFF => {
-                match (self.external_ram_enable, self.bank_mode_register) {
-                    (false, _) => 0,
-                    (_, 0) => self.ram_bank[index as usize - 0xA000],
-                    (_, 1) => {
-                        let full_index = ((self.ram_select_register as usize) << 13) | (index & 0x3FFF) as usize;
-                        self.ram_bank[full_index - 0xA000]
-                    },
-                    _ => unreachable!("Invalid bank mode encountered when indexing rom: {}", self.bank_mode_register),
+                if !self.external_ram_enable {
+                    return 0xFF
+                }
+                if self.bank_mode_register == 0 {
+                    self.ram_bank[index as usize - 0xA000]
+                } else {
+                    let bank_number = self.ram_select_register as usize;
+                    let bank_offset = bank_number * 0x2000;
+                    self.ram_bank[bank_offset + index as usize - 0xA000]
                 }
             },
             0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000],
@@ -208,17 +212,23 @@ impl AddressSpace {
             // 0..=0x7FFF => println!("Tried to write into {:02X} which is not writeable", index),
             0..=0x1FFF => {
                 if value & 0xF == 0xA {
-                    self.external_ram_enable = false;
-                } else {
                     self.external_ram_enable = true;
+                } else {
+                    self.external_ram_enable = false;
                 }
             },
             0x2000..=0x3FFF => {
                 // self.selected_rom_bank = value & (self.num_rom_banks as u8 - 1); // TODO: implement when checking selected rom
-                self.rom_select_register = value & std::cmp::min(0x1F, self.num_rom_banks - 1) as u8;
+                if value & 0x1F == 0 {
+                    self.rom_select_register = 1;
+                } else {
+                    self.rom_select_register = value & std::cmp::min(0x1F, self.num_rom_banks - 1) as u8;
+                }
             }
             0x4000..=0x5FFF => {
-                self.ram_select_register = value & 0x03;
+                if self.num_ram_banks > 1 || self.num_rom_banks > 32 {
+                    self.ram_select_register = value & 0x03;
+                }
             }
             0x6000..=0x7FFF => {
                 self.bank_mode_register = value & 0x01;
@@ -226,14 +236,17 @@ impl AddressSpace {
             0x8000..=0x9FFF => if self.vram_writeable {
                 self.vram[index as usize - 0x8000] = value
             },
-            0xA000..=0xBFFF => match (self.external_ram_enable, self.bank_mode_register) {
-                (false, _) => (),
-                (_, 0) => self.ram_bank[index as usize - 0xA000] = value,
-                (_, 1) => {
-                    let full_index = ((self.ram_select_register as usize) << 13) | (index & 0x3FFF) as usize;
-                    self.ram_bank[full_index - 0xA000] = value;
-                },
-                _ => unreachable!("Invalid bank mode encountered when indexing rom: {}", self.bank_mode_register),
+            0xA000..=0xBFFF => {
+                if !self.external_ram_enable || self.ram_bank.len() == 0 {
+                    return
+                }
+                if self.bank_mode_register == 0 {
+                    self.ram_bank[index as usize - 0xA000] = value;
+                } else {
+                    let bank_number = self.ram_select_register as usize;
+                    let bank_offset = bank_number * 0x2000;
+                    self.ram_bank[bank_offset + index as usize - 0xA000] = value
+                }
             }
             0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000] = value,
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000] = value,
@@ -263,6 +276,8 @@ impl AddressSpace {
                     self.standard_io[index as usize - 0xFF00] = value;
                 } else if idx == DIV_ADDR {
                     self.internal_div = 0
+                } else if idx == SB_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value
                 } else {
                     self.standard_io[index as usize - 0xFF00] = value
                 }
