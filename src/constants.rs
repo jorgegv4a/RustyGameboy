@@ -3,13 +3,11 @@ pub const GB_INTERNAL_RAM_SIZE: usize = 8 * 1024;
 pub const GB_VRAM_SIZE: usize = 8 * 1024;
 pub const OAM_SIZE: usize = 160;
 pub const CARTRIDGE_RAM_SIZE: usize = 8 * 1024;
-pub const CARTRIDGE_ROM_ONLY: usize = 0x00;
-pub const CARTRIDGE_MBC1: usize = 0x01;
 
 pub const SCREEN_HEIGHT: usize = 144;
 pub const SCREEN_WIDTH: usize = 160;
-pub const NUM_DOTS_PER_LINE: usize = 456;
-pub const NUM_SCAN_LINES: usize = 154;
+pub const NUM_DOTS_PER_LINE: u16 = 456;
+pub const NUM_SCAN_LINES: u8 = 154;
 
 pub const LCDC_BG_WIN_DISPLAY_BIT: u8 = 0;
 pub const LCDC_OBJ_ENABLE_BIT: u8 = 1;

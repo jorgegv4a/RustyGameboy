@@ -4,13 +4,12 @@ use sdl2::pixels::Color;
 use sdl2::VideoSubsystem;
 use std::collections::HashSet;
 use std::time::Duration;
-use std::collections::HashMap;
 use std::cmp::{min, max};
 use sdl2::rect::Point;
 use std::time::Instant;
 use std::convert::Into;
 
-use crate::{constants::*, memory};
+use crate::constants::*;
 use crate::interrupt::Interrupt;
 use crate::memory::AddressSpace;
 use crate::sprites::*;
@@ -109,10 +108,6 @@ impl PPU {
         return memory.read(WY_ADDR) as usize;
     }
 
-    fn get_stat_mode(&self, memory: &AddressSpace) -> u8 {
-        return (memory.read(STAT_ADDR) >> 2) & 7;
-    }
-
     fn window_enabled(&self, memory: &AddressSpace) -> bool {
         let lcdc = memory.read(LCDC_ADDR);
         let win_en = (lcdc >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
@@ -121,13 +116,10 @@ impl PPU {
     }
 
     fn check_stat_irq(&self, memory: &AddressSpace) -> bool {
-        let lyc = memory.read(LYC_ADDR);
-        
-        let mut value = memory.read(STAT_ADDR);
+        let value = memory.read(STAT_ADDR);
         let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
 
         if (value >> 2) & 1 == 1 && interrupt_on_equal_lyc {
-                // print!("\rLY == LYC on line {}, dot: {}", self.ly, self.dot);
                 return true;
         }
         if (value >> 3) & 1 == 1 && self.mode == PPUMode::VBlank {
@@ -194,9 +186,9 @@ impl PPU {
                         let fps = 1.0 / frame_time_seconds;
                         if frame_time_seconds < 1.0 / 60.0 {
                             let diff = 1.0 / 60.0 - frame_time_seconds;
-                            std::thread::sleep(std::time::Duration::from_secs_f64(diff));
+                            std::thread::sleep(Duration::from_secs_f64(diff));
                         }
-                        // println!("Frame time: {:.3} ms, FPS: {fps:.1}", frame_time_seconds * 1000.0);
+                        println!("Frame time: {:.3} ms, FPS: {fps:.1}", frame_time_seconds * 1000.0);
                         self.frame_start_t = Instant::now();
                     }
                 }
@@ -237,7 +229,7 @@ impl PPU {
                 self.dot += 1;
             },
             PPUMode::HBlank => {
-                if self.dot == 456 { 
+                if self.dot == NUM_DOTS_PER_LINE { 
                     self.dot = 0; 
                     self.ly += 1; 
                     if self.ly == 144 { 
@@ -258,14 +250,14 @@ impl PPU {
                 }
             },
             PPUMode::VBlank => {
-                if self.dot == 456 { 
+                if self.dot == NUM_DOTS_PER_LINE { 
                     self.dot = 0; 
                     self.ly += 1; 
                     memory.ppu_write_LY_update_STAT(self.ly);
                 } else {
                     self.dot += 1;
                 }
-                if self.ly == 153 { 
+                if self.ly == NUM_SCAN_LINES - 1 { 
                     self.ly = 0; 
                     self.mode = PPUMode::OAMScan;
                     self.line_objects.clear();
@@ -279,7 +271,6 @@ impl PPU {
     self.update_stat(memory);
     if !self.stat_flag && self.check_stat_irq(memory) {
         memory.request_interrupt(Interrupt::LCD);
-        println!("{}, {}, {:08b}, {:?}", self.ly, memory.read(LYC_ADDR), memory.read(STAT_ADDR), self.mode);
     } else {
         // println!("\r");
     }
@@ -313,12 +304,12 @@ impl PPU {
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
-        for i in 0..nticks {
+        for _ in 0..nticks {
             self.single_tick(memory);
         }
     }
 
-    fn get_background_tile_map(&self, memory: &AddressSpace) -> ([[u16; 32]; 32], HashSet<u16>) {
+    fn _get_background_tile_map(&self, memory: &AddressSpace) -> ([[u16; 32]; 32], HashSet<u16>) {
         let mut tile_map = [[0u16; 32]; 32];
         let tile_map_base_address = if self.get_bg_tile_map(memory) { 0x9C00 } else { 0x9800 };
         let mut unique_tiles: HashSet<u16> = HashSet::new();

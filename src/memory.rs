@@ -1,6 +1,4 @@
 #![allow(non_camel_case_types)]
-use std::str::FromStr;
-
 use crate::constants::*;
 use crate::interrupt::Interrupt;
 
@@ -93,14 +91,14 @@ impl AddressSpace {
     }
 
     pub fn request_interrupt(&mut self, interrupt: Interrupt) {
-        let interrupt_mask = (1 << interrupt as usize);
+        let interrupt_mask = 1 << interrupt as usize;
         let mut interrupt_flags = self.read(IF_ADDR);
         interrupt_flags |= interrupt_mask;
         self.write(IF_ADDR, interrupt_flags);
     }
 
     pub fn load_rom(&mut self, rom_bytes: Vec<u8>) -> Result<(), String> {
-        let cartridge_type: Cartridge = Cartridge::from(rom_bytes[0x147]);
+        // let cartridge_type: Cartridge = Cartridge::from(rom_bytes[0x147]);
         // if cartridge_type != Cartridge::RomOnly {
         //     panic!("Only ROM only cartridges are supported, found {cartridge_type:?}");
         // }
@@ -127,7 +125,7 @@ impl AddressSpace {
             0x05 => 8,
             _ => unreachable!("Invalid ram bank code found: {ram_banks_code}"),
         };
-        let ram_size = num_ram_banks * 8 * 1024;
+        let ram_size = num_ram_banks * CARTRIDGE_RAM_SIZE;
         println!("Rom with {num_ram_banks} banks, total {ram_size} KB");
         
         self.ram_bank.resize(ram_size, 0);
@@ -297,7 +295,7 @@ impl AddressSpace {
         }
     }
 
-    pub fn lock_vram(&mut self) {
+    pub fn _lock_vram(&mut self) {
         self.vram_writeable = false;
     }
 
@@ -331,7 +329,7 @@ impl AddressSpace {
         self.standard_io[STAT_ADDR as usize - 0xFF00] = stat_value;
     }
 
-    pub fn ppu_write_LY(&mut self, ly_value: u8) {
+    pub fn _ppu_write_LY(&mut self, ly_value: u8) {
         self.standard_io[LCDY_ADDR as usize - 0xFF00] = ly_value;
     }
 
@@ -383,7 +381,7 @@ impl AddressSpace {
     }
 
     pub fn tick(&mut self, nticks: u8) {
-        for i in 0..nticks {
+        for _ in 0..nticks {
             self.dma_single_tick();
             let tima_enabled = self.increment_div();
             if self.past_tick_tima_enabled & !tima_enabled {

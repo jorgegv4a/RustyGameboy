@@ -2,7 +2,7 @@
 use core::panic;
 
 use crate::registers::RegisterBank;
-use crate::memory::{self, AddressSpace};
+use crate::memory::AddressSpace;
 use crate::opcodes::{get_opcodes, Opcode};
 use serde_json::Value;
 
@@ -212,7 +212,7 @@ impl CPU {
             
             // LOADS
             } else if opcode == 0x08 {
-                self.handle_load_from_SP_to_indirect_address(opcode, extra_bytes, memory);
+                self.handle_load_from_SP_to_indirect_address(extra_bytes, memory);
 
             } else if (0x40 <= opcode && opcode < 0x80) && opcode != 0x76 {
                 self.handle_no_param_loads(opcode, memory);
@@ -240,10 +240,10 @@ impl CPU {
                 }
 
             } else if opcode == 0xC3 {
-                self.handle_jump_absolute_d16(opcode, extra_bytes);
+                self.handle_jump_absolute_d16(extra_bytes);
 
             } else if opcode == 0xE9 {
-                self.handle_jump_absolute_HL(opcode, extra_bytes);
+                self.handle_jump_absolute_HL();
 
             } else if opcode & 0xE7 == 0x20 {
                 let branch = self.handle_jump_relative_cond(opcode, extra_bytes);
@@ -252,7 +252,7 @@ impl CPU {
                 }
                 
             } else if opcode == 0x18 {
-                self.handle_jump_relative(opcode, extra_bytes);
+                self.handle_jump_relative(extra_bytes);
 
             // ARITHMETIC/LOGIC
             } else if 0x80 <= opcode && opcode < 0xC0 {
@@ -275,7 +275,7 @@ impl CPU {
                 self.handle_add_r16(opcode);
 
             } else if opcode == 0xE8 {
-                self.handle_add_SP_int8(opcode, extra_bytes);
+                self.handle_add_SP_int8(extra_bytes);
             
             // STACK
             } else if opcode & 0xCF == 0xC1 {
@@ -292,7 +292,7 @@ impl CPU {
                 self.handle_call_cond(opcode, extra_bytes, memory);
 
             } else if opcode == 0xCD {
-                self.handle_call_d16(opcode, extra_bytes, memory);
+                self.handle_call_d16(extra_bytes, memory);
 
             } else if opcode & 0xC7 == 0xC7 {
                 self.handle_reset_vector(opcode, memory);
@@ -416,7 +416,7 @@ impl CPU {
         return true
     }
 
-    fn handle_jump_absolute_d16(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
+    fn handle_jump_absolute_d16(&mut self, extra_bytes: Vec<u8>) {
         let address = bytes_to_u16(extra_bytes);
         if DEBUG {
             println!("> JP nn ({:04X})", address);
@@ -424,7 +424,7 @@ impl CPU {
         self.registers.write_PC(address);
     }
 
-    fn handle_jump_absolute_HL(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
+    fn handle_jump_absolute_HL(&mut self) {
         if DEBUG {
             println!("> JP HL");
         }
@@ -452,7 +452,7 @@ impl CPU {
         return true
     }
 
-    fn handle_jump_relative(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
+    fn handle_jump_relative(&mut self, extra_bytes: Vec<u8>) {
         let immediate = byte_to_i16(extra_bytes[0]);
         if DEBUG {
             println!("> JR e ({immediate:02X})");
@@ -591,17 +591,16 @@ impl CPU {
         let operand_value = self.read_single(&src_reg, memory);
         let increment_op = opcode & 1 == 0;
         let new_value: u8;
-        let overflow: bool;
 
         if increment_op {
-            (new_value, overflow) = operand_value.overflowing_add(1);
+            (new_value, _) = operand_value.overflowing_add(1);
             self.write_single(&src_reg, new_value, memory);
             self.registers.flag_H_from_bool((operand_value & 0xF) == 0xF);
             if DEBUG {
                 println!("> INC {src_reg:?}");
             }
         } else {
-            (new_value, overflow) = operand_value.overflowing_sub(1);
+            (new_value, _) = operand_value.overflowing_sub(1);
             self.write_single(&src_reg, new_value, memory);
             self.registers.flag_H_from_bool((operand_value & 0xF) == 0);
             if DEBUG {
@@ -651,13 +650,13 @@ impl CPU {
 
     }
 
-    fn handle_add_SP_int8(&mut self, opcode: u16, extra_bytes: Vec<u8>) {
+    fn handle_add_SP_int8(&mut self, extra_bytes: Vec<u8>) {
         let immediate = byte_to_i16(extra_bytes[0]);
         if DEBUG {
             println!("> ADD SP, e ({immediate:02X})");
         }
         let value_pre = self.registers.SP;
-        let (new_value, overflow) = self.registers.SP.overflowing_add(immediate);
+        let (new_value, _) = self.registers.SP.overflowing_add(immediate);
         self.write_double(&DoubleDataLoc::SP, new_value);
         self.registers.flag_H_from_bool((value_pre & 0xF) + (immediate & 0xF) > 0xF);
         self.registers.flag_C_from_bool((value_pre & 0xFF) + (immediate & 0xFF) > 0xFF);
@@ -665,7 +664,7 @@ impl CPU {
         self.registers.clear_flag_N();
     }
 
-    fn handle_load_from_SP_to_indirect_address(&mut self, opcode: u16, extra_bytes: Vec<u8>, memory: &mut AddressSpace) {
+    fn handle_load_from_SP_to_indirect_address(&mut self, extra_bytes: Vec<u8>, memory: &mut AddressSpace) {
         let immediate = bytes_to_u16(extra_bytes);
         if DEBUG {
             println!("> LD (a16), SP ({immediate:04X})")
@@ -766,7 +765,7 @@ impl CPU {
                 println!("> LD HL, SP+e ({immediate:02X})");
             }
             let value_pre = self.registers.SP;
-            let (result, overflow) = self.registers.SP.overflowing_add(immediate);
+            let (result, _) = self.registers.SP.overflowing_add(immediate);
             self.write_double(&DoubleDataLoc::HL, result);
             self.registers.flag_C_from_bool((value_pre & 0xFF) + (immediate & 0xFF) > 0xFF);
             self.registers.flag_H_from_bool((value_pre & 0xF) + (immediate & 0xF) > 0xF);
@@ -843,7 +842,7 @@ impl CPU {
         if src_reg == DoubleDataLoc::SP {
             src_reg = DoubleDataLoc::AF;
         }
-        let operand_value = self.read_double(&src_reg);
+        let _operand_value = self.read_double(&src_reg);
         if DEBUG {
             println!("> POP, {src_reg:?}");
         }
@@ -933,7 +932,7 @@ impl CPU {
         return true
     }
 
-    fn handle_call_d16(&mut self, opcode: u16, extra_bytes: Vec<u8>, memory: &mut AddressSpace) {
+    fn handle_call_d16(&mut self, extra_bytes: Vec<u8>, memory: &mut AddressSpace) {
         let address = bytes_to_u16(extra_bytes);
         if DEBUG {
             println!("> CALL nn ({address:04X})");
@@ -1033,7 +1032,7 @@ impl CPU {
     fn shift_left_arith(&mut self, src: SingleDataLoc, memory: &mut AddressSpace) {
         let operand_value = self.read_single(&src, memory);
         let top_bit = (operand_value >> 7) & 1;
-        let output_value = ((operand_value & 0x7F) << 1);
+        let output_value = (operand_value & 0x7F) << 1;
         self.write_single(&src, output_value, memory);
         self.registers.flag_C_from_bool(top_bit > 0);
         self.registers.flag_Z_from_bool(output_value == 0);
@@ -1076,7 +1075,7 @@ impl CPU {
     fn handle_no_params_shifts(&mut self, opcode: u8, memory: &mut AddressSpace) {
         let src_reg_i = opcode as u8 & 0x7;
         let src_reg: SingleDataLoc = SingleDataLoc::from((src_reg_i, None));
-        let operand_value = self.read_single(&src_reg, memory);
+        let _operand_value = self.read_single(&src_reg, memory);
         if (opcode >> 3) & 0x7 == 0x0 {
             if DEBUG {
                 println!("> RLC {src_reg:?}");

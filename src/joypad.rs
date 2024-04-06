@@ -1,23 +1,11 @@
-use device_query::{DeviceQuery, DeviceState, MouseState, Keycode};
-use crate::memory::{self, AddressSpace};
-use crate::constants::*;
+use device_query::{DeviceQuery, DeviceState, Keycode};
+use crate::memory::AddressSpace;
 use crate::interrupt::Interrupt;
 
 pub struct Joypad {
     state: u8,
     device_state: DeviceState,
     ticks: u64,
-}
-
-enum GBKeys {
-    Right = 0,
-    Left = 1,
-    Up = 2,
-    Down = 3,
-    A = 4,
-    B = 5,
-    Select = 6,
-    Start = 7,
 }
 
 impl Joypad {
@@ -30,12 +18,7 @@ impl Joypad {
         }
     }
 
-    fn get_selection(&self, memory: &AddressSpace) -> u8 {
-        return (memory.read(JOYP_ADDR) >> 4) & 0x3;
-    }
-
     fn update_memory(&self, memory: &mut AddressSpace) {
-        let selection = (self.get_selection(memory) >> 4) & 0x3;
         memory.joypad_write(self.state); 
     }
 

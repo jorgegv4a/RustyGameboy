@@ -2,13 +2,9 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-use sdl2::EventPump;
-use sdl2::event::Event;
-use sdl2::keyboard::Keycode;
-
 use crate::constants::{IF_ADDR, IE_ADDR, SB_ADDR, SC_ADDR};
 use crate::cpu::{CPU, DEBUG};
-use crate::memory::{AddressSpace, Cartridge};
+use crate::memory::AddressSpace;
 use crate::graphics::PPU;
 use crate::interrupt::Interrupt;
 use crate::joypad::Joypad;
@@ -18,20 +14,17 @@ pub struct Gameboy {
     memory: AddressSpace,
     ppu: PPU,
     joypad: Joypad,
-    events: EventPump,
 }
 
 impl Gameboy {
     pub fn new() -> Gameboy {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
-        let mut event_pump = sdl_context.event_pump().unwrap();
         Gameboy {
             cpu: CPU::new(),
             memory: AddressSpace::new(),
             ppu: PPU::new(video_subsystem),
             joypad: Joypad::new(),
-            events: event_pump,
         }
     }
 
@@ -41,11 +34,11 @@ impl Gameboy {
             Ok(file) => file,
         };
         let mut buf = Vec::new();
-        let content = match file.read_to_end(&mut buf) {
+        let _content = match file.read_to_end(&mut buf) {
             Err(er) => panic!("Error found: '{}'", er),
             Ok(file) => file,
         };
-        self.memory.load_rom(buf);
+        let _ = self.memory.load_rom(buf);
     }
 
     fn check_interrupts(&self) -> Option<Interrupt> {

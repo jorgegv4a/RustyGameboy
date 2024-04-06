@@ -7,11 +7,6 @@ pub struct Opcode {
     pub mnemonic: String,
     pub length: u8,
     pub cycles: Vec<u8>,
-
-    #[serde(default)]
-    operand1: Option<String>,
-    #[serde(default)]
-    operand2: Option<String>,
 }
 
 
