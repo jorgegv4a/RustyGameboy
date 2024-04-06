@@ -40,14 +40,15 @@ pub struct PPU {
 }
 
 impl PPU {
-    pub fn new(sdl_subsystem: VideoSubsystem) -> PPU {
+    pub fn new(sdl_subsystem: VideoSubsystem, window_scale: f32) -> PPU {
         let window = sdl_subsystem
-            .window("rust-sdl2 demo: Video", SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)
+            .window("rust-sdl2 demo: Video", (SCREEN_WIDTH as f32 * window_scale) as u32, (SCREEN_HEIGHT as f32 * window_scale) as u32)
             .position_centered()
             .opengl()
             .build()
             .map_err(|e| e.to_string()).unwrap();
-        let canvas = window.into_canvas().build().map_err(|e| e.to_string()).unwrap();
+        let mut canvas = window.into_canvas().build().map_err(|e| e.to_string()).unwrap();
+        canvas.set_scale(window_scale, window_scale);
         PPU {
             dot: 0,
             ly: 0,

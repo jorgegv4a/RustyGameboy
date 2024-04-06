@@ -23,7 +23,7 @@ impl Gameboy {
         Gameboy {
             cpu: CPU::new(),
             memory: AddressSpace::new(),
-            ppu: PPU::new(video_subsystem),
+            ppu: PPU::new(video_subsystem, 3.0),
             joypad: Joypad::new(),
         }
     }
