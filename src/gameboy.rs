@@ -38,7 +38,10 @@ impl Gameboy {
             Err(er) => panic!("Error found: '{}'", er),
             Ok(file) => file,
         };
-        let _ = self.memory.load_rom(buf);
+        match self.memory.load_rom(buf) {
+            Ok(x) => x,
+            Err(s) => panic!("Failed to load game: {s}"),
+        };
     }
 
     fn check_interrupts(&self) -> Option<Interrupt> {

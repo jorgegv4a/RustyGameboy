@@ -1,18 +1,7 @@
 #![allow(non_camel_case_types)]
 use crate::constants::*;
 use crate::interrupt::Interrupt;
-
-#[derive(PartialEq, Debug)]
-pub enum Cartridge {
-    RomOnly = 0x00,
-    MBC1 = 0x01,
-    MBC1_RAM_BATTERY = 0x03,
-    MBC2 = 0x05,
-    MBC3 = 0x11,
-    MBC3_RAM_BATTERY = 0x13,
-    MBC5 = 0x19,
-    MBC6 = 0x20,
-}
+use crate::mappers::{Addressable, Cartridge, NoCartridge, RomOnly, MBC1};
 
 impl std::convert::From<u8> for Cartridge {
     fn from(value: u8) -> Self {
@@ -31,11 +20,7 @@ impl std::convert::From<u8> for Cartridge {
 }
 
 pub struct AddressSpace {
-    pub raw_game_rom: Vec<u8>,
-    pub rom_bank: Vec<u8>,
-    active_rom_bank: Vec<u8>,
     vram: [u8; GB_VRAM_SIZE],
-    ram_bank: Vec<u8>,
     internal_ram: [u8; GB_INTERNAL_RAM_SIZE],
     oam: [u8; OAM_SIZE],
     empty_io: [u8; 96],
@@ -51,22 +36,13 @@ pub struct AddressSpace {
     internal_div: u16,
     past_tick_tima_enabled: bool,
     clock: u64,
-    rom_select_register: u8,
-    ram_select_register: u8,
-    bank_mode_register: u8,
-    external_ram_enable: bool,
-    num_rom_banks: usize,
-    num_ram_banks: usize,
+    mapper: Box<dyn Addressable>,
 }
 
 impl AddressSpace {
     pub fn new() -> AddressSpace {
         AddressSpace {
-            raw_game_rom: Vec::new(),
-            rom_bank: Vec::new(),
-            active_rom_bank: Vec::new(),
             vram: [0; GB_VRAM_SIZE],
-            ram_bank: Vec::new(),
             internal_ram: [0; GB_INTERNAL_RAM_SIZE],
             oam: [0; OAM_SIZE],
             empty_io: [0; 96],
@@ -82,13 +58,7 @@ impl AddressSpace {
             internal_div: 0,
             past_tick_tima_enabled: false,
             clock: 0,
-            rom_select_register: 1,
-            ram_select_register: 0,
-            bank_mode_register: 0,
-            external_ram_enable: false,
-            num_rom_banks: 0,
-            num_ram_banks: 0,
-            
+            mapper: Box::new(NoCartridge::new(Vec::new())),
         }
     }
 
@@ -99,73 +69,22 @@ impl AddressSpace {
         self.write(IF_ADDR, interrupt_flags);
     }
 
-    pub fn load_rom(&mut self, rom_bytes: Vec<u8>) -> Result<(), String> {
-        // let cartridge_type: Cartridge = Cartridge::from(rom_bytes[0x147]);
-        // if cartridge_type != Cartridge::RomOnly {
-        //     panic!("Only ROM only cartridges are supported, found {cartridge_type:?}");
-        // }
-        // match rom_bytes.len() {
-        //     x if x > 0x8000 => panic!("ROM size too large"),
-        //     x if x < 0x8000 => panic!("ROM size too small"),
-        //     _ => (),
-
-        // }
-        self.num_rom_banks = 2 << rom_bytes[0x148];
-        let rom_size = self.num_rom_banks * 16;
-        println!("Rom with {} banks, total {rom_size} KB", self.num_rom_banks);
-        if rom_size > 1024 {
-            unimplemented!("Alternate RAM wiring!")
-        }
-
-        let ram_banks_code = rom_bytes[0x149];
-        self.num_ram_banks = match ram_banks_code {
-            0x00 => 0,
-            0x01 => panic!("Unused ram code found"),
-            0x02 => 1,
-            0x03 => 4,
-            0x04 => 16,
-            0x05 => 8,
-            _ => unreachable!("Invalid ram bank code found: {ram_banks_code}"),
+    pub fn load_rom(&mut self, game_bytes: Vec<u8>) -> Result<(), String> {
+        let cartridge_type: Cartridge = Cartridge::from(game_bytes[0x147]);
+        match cartridge_type {
+            Cartridge::RomOnly => self.mapper = Box::new(RomOnly::new(game_bytes)),
+            Cartridge::MBC1 => self.mapper = Box::new(MBC1::new(game_bytes)),
+            // _ => unimplemented!("No mapper implemented for cartridge type {cartridge_type:?}"),
+            _ => self.mapper = Box::new(MBC1::new(game_bytes)),
         };
-        let ram_size = self.num_ram_banks * CARTRIDGE_RAM_SIZE;
-        println!("Ram with {} banks, total {ram_size} KB", self.num_ram_banks);
-        
-        self.ram_bank.resize(ram_size, 0);
-
-        self.rom_bank.extend_from_slice(&rom_bytes[..GB_ROM_BANK_SIZE]);
-        self.active_rom_bank.extend_from_slice(&rom_bytes[GB_ROM_BANK_SIZE..self.num_rom_banks*GB_ROM_BANK_SIZE]);
-        self.raw_game_rom = rom_bytes.clone();
-
-        if let Ok(title) = String::from_utf8(rom_bytes[0x134..0x144].to_vec()) {
-            println!("Loading '{title}'");
-        } else {
-            println!("Couldn't load title.");
-        }
+        println!("Cartridge mapper '{cartridge_type:?}'");
         Ok(())
     }
 
     pub fn read(&self, index: u16) -> u8 {
         let value = match index {
-            0..=0x3FFF => {
-                if self.num_rom_banks <= 32 || self.bank_mode_register == 0 {
-                    return self.rom_bank[index as usize];
-                }
-                let bank_number = (self.ram_select_register << 5) as usize;
-                let bank_offset = (bank_number - 1) * 0x4000;
-                self.active_rom_bank[bank_offset + index as usize]
-            },
-            0x4000..=0x7FFF => {
-                let bank_number;
-                if self.num_rom_banks <= 32 {
-                    bank_number = self.rom_select_register as usize;
-                    if bank_number == 0 {
-                        return self.rom_bank[index as usize - 0x4000]
-                    }
-                } else {
-                    bank_number = (self.ram_select_register << 5) as usize | self.rom_select_register as usize;
-                }
-                let bank_offset = (bank_number - 1) * 0x4000;
-                self.active_rom_bank[bank_offset + index as usize - 0x4000]
+            0..=0x7FFF => {
+                self.mapper.read(index)
             },
             0x8000..=0x9FFF => if self.vram_writeable {
                 self.vram[index as usize - 0x8000]
@@ -173,16 +92,7 @@ impl AddressSpace {
                 0xFF
             },
             0xA000..=0xBFFF => {
-                if !self.external_ram_enable {
-                    return 0xFF
-                }
-                if self.bank_mode_register == 0 {
-                    self.ram_bank[index as usize - 0xA000]
-                } else {
-                    let bank_number = self.ram_select_register as usize;
-                    let bank_offset = bank_number * 0x2000;
-                    self.ram_bank[bank_offset + index as usize - 0xA000]
-                }
+                self.mapper.read(index)
             },
             0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000],
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000],
@@ -210,43 +120,14 @@ impl AddressSpace {
     pub fn write(&mut self, index: u16, value: u8) {
         match index {
             // 0..=0x7FFF => println!("Tried to write into {:02X} which is not writeable", index),
-            0..=0x1FFF => {
-                if value & 0xF == 0xA {
-                    self.external_ram_enable = true;
-                } else {
-                    self.external_ram_enable = false;
-                }
-            },
-            0x2000..=0x3FFF => {
-                // self.selected_rom_bank = value & (self.num_rom_banks as u8 - 1); // TODO: implement when checking selected rom
-                if value & 0x1F == 0 {
-                    self.rom_select_register = 1;
-                } else {
-                    self.rom_select_register = value & std::cmp::min(0x1F, self.num_rom_banks - 1) as u8;
-                }
-            }
-            0x4000..=0x5FFF => {
-                if self.num_ram_banks > 1 || self.num_rom_banks > 32 {
-                    self.ram_select_register = value & 0x03;
-                }
-            }
-            0x6000..=0x7FFF => {
-                self.bank_mode_register = value & 0x01;
+            0..=0x7FFF => {
+                self.mapper.write(index, value)
             }
             0x8000..=0x9FFF => if self.vram_writeable {
                 self.vram[index as usize - 0x8000] = value
             },
             0xA000..=0xBFFF => {
-                if !self.external_ram_enable || self.ram_bank.len() == 0 {
-                    return
-                }
-                if self.bank_mode_register == 0 {
-                    self.ram_bank[index as usize - 0xA000] = value;
-                } else {
-                    let bank_number = self.ram_select_register as usize;
-                    let bank_offset = bank_number * 0x2000;
-                    self.ram_bank[bank_offset + index as usize - 0xA000] = value
-                }
+                self.mapper.write(index, value)
             }
             0xC000..=0xDFFF => self.internal_ram[index as usize - 0xC000] = value,
             0xE000..=0xFDFF => self.internal_ram[index as usize - 0xE000] = value,
