@@ -11,3 +11,11 @@ serde_json = "1.0"
 sdl2 = "0.35"
 rand = "0.8.5"
 device_query = "2.0.0"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
