@@ -20,11 +20,12 @@ impl Gameboy {
     pub fn new() -> Gameboy {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
+        let mut event_pump = sdl_context.event_pump().unwrap();
         Gameboy {
             cpu: CPU::new(),
             memory: AddressSpace::new(),
             ppu: PPU::new(video_subsystem, 3.0),
-            joypad: Joypad::new(),
+            joypad: Joypad::new(event_pump),
         }
     }
 

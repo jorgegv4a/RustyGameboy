@@ -1,4 +1,6 @@
 use device_query::{DeviceQuery, DeviceState, Keycode};
+use sdl2::event::EventPollIterator;
+use sdl2::EventPump;
 use crate::memory::AddressSpace;
 use crate::interrupt::Interrupt;
 
@@ -6,15 +8,17 @@ pub struct Joypad {
     state: u8,
     device_state: DeviceState,
     ticks: u64,
+    event_pump: EventPump,
 }
 
 impl Joypad {
-    pub fn new() -> Joypad {
+    pub fn new(event_pump: EventPump) -> Joypad {
         let device_state = DeviceState::new();
         Joypad {
             state: 0xFF,
             device_state,
             ticks: 0,
+            event_pump
         }
     }
 
@@ -79,6 +83,7 @@ impl Joypad {
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) -> bool {
+        let x_ = self.event_pump.poll_iter();
         self.ticks += nticks as u64;
         if self.ticks >= 7022 {
             self.ticks = self.ticks % 7022;

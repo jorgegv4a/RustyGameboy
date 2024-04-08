@@ -1,7 +1,7 @@
 #![allow(non_camel_case_types)]
 use crate::constants::*;
 use crate::interrupt::Interrupt;
-use crate::mappers::{Addressable, Cartridge, NoCartridge, RomOnly, MBC1};
+use crate::mappers::{Addressable, Cartridge, NoCartridge, RomOnly, MBC1, MBC3};
 
 impl std::convert::From<u8> for Cartridge {
     fn from(value: u8) -> Self {
@@ -74,8 +74,10 @@ impl AddressSpace {
         match cartridge_type {
             Cartridge::RomOnly => self.mapper = Box::new(RomOnly::new(game_bytes)),
             Cartridge::MBC1 => self.mapper = Box::new(MBC1::new(game_bytes)),
-            // _ => unimplemented!("No mapper implemented for cartridge type {cartridge_type:?}"),
-            _ => self.mapper = Box::new(MBC1::new(game_bytes)),
+            Cartridge::MBC1_RAM_BATTERY => self.mapper = Box::new(MBC1::new(game_bytes)),
+            Cartridge::MBC3 => self.mapper = Box::new(MBC3::new(game_bytes)),
+            Cartridge::MBC3_RAM_BATTERY => self.mapper = Box::new(MBC3::new(game_bytes)),
+            _ => unimplemented!("No mapper implemented for cartridge type {cartridge_type:?}"),
         };
         println!("Cartridge mapper '{cartridge_type:?}'");
         Ok(())
@@ -285,6 +287,10 @@ impl AddressSpace {
             }
             self.past_tick_tima_enabled = tima_enabled;
             self.clock += 1;
+        }
+        match self.mapper.cartridge_type() {
+            Some(Cartridge::MBC3) => self.mapper.tick(nticks),
+            _ => (),
         }
         
     }

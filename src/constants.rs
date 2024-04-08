@@ -47,3 +47,4 @@ pub const TAC_ADDR: u16 = 0xFF07;
 
 pub const DMA_ADDR: u16 = 0xFF46;
 
+pub const CLOCK_FREQ_HZ: u32 = 4194304;
