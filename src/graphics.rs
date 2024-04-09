@@ -15,6 +15,58 @@ use crate::memory::AddressSpace;
 use crate::sprites::*;
 
 
+fn get_bg_win_display(memory: &AddressSpace) -> bool {
+    return (memory.read(LCDC_ADDR) >> LCDC_BG_WIN_DISPLAY_BIT) & 1 == 1;
+}
+
+fn get_win_tile_map(memory: &AddressSpace) -> bool {
+    return (memory.read(LCDC_ADDR) >> LCDC_WINDOW_TILE_MAP_BIT) & 1 == 1;
+}
+
+fn get_bg_win_tile_data_zone(memory: &AddressSpace) -> bool {
+    return (memory.read(LCDC_ADDR) >> LCDC_BG_WINDOW_TILE_DATA_AREA_BIT) & 1 == 1;
+}
+
+fn get_bg_tile_map(memory: &AddressSpace) -> bool {
+    return (memory.read(LCDC_ADDR) >> LCDC_BG_TILE_MAP_BIT) & 1 == 1;
+}
+
+fn get_obj_size(memory: &AddressSpace) -> bool {
+    return (memory.read(LCDC_ADDR) >> LCDC_OBJ_SIZE_BIT) & 1 == 1;
+}
+
+fn get_ppu_enabled(memory: &AddressSpace) -> bool {
+    return (memory.read(LCDC_ADDR) >> LCDC_PPU_ENABLE_BIT) & 1 == 1;
+}
+
+fn get_obj_enabled(memory: &AddressSpace) -> bool {
+    return (memory.read(LCDC_ADDR) >> LCDC_OBJ_ENABLE_BIT) & 1 == 1;
+}
+
+fn scx(memory: &AddressSpace) -> usize {
+    return memory.read(SCX_ADDR) as usize;
+}
+
+fn scy(memory: &AddressSpace) -> usize {
+    return memory.read(SCY_ADDR) as usize;
+}
+
+fn wx(memory: &AddressSpace) -> usize {
+    return memory.read(WX_ADDR) as usize;
+}
+
+fn wy(memory: &AddressSpace) -> usize {
+    return memory.read(WY_ADDR) as usize;
+}
+
+fn window_enabled(memory: &AddressSpace) -> bool {
+    let lcdc = memory.read(LCDC_ADDR);
+    let win_en = (lcdc >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
+    let win_gb_en = get_bg_win_display(memory);
+    return win_en && win_gb_en;
+}
+
+
 #[derive(Debug, PartialEq)]
 pub enum PPUMode {
     HBlank,
@@ -65,57 +117,6 @@ impl PPU {
         }
     }
 
-    fn get_bg_win_display(&self, memory: &AddressSpace) -> bool {
-        return (memory.read(LCDC_ADDR) >> LCDC_BG_WIN_DISPLAY_BIT) & 1 == 1;
-    }
-
-    fn get_win_tile_map(&self, memory: &AddressSpace) -> bool {
-        return (memory.read(LCDC_ADDR) >> LCDC_WINDOW_TILE_MAP_BIT) & 1 == 1;
-    }
-
-    fn get_bg_win_tile_data_zone(&self, memory: &AddressSpace) -> bool {
-        return (memory.read(LCDC_ADDR) >> LCDC_BG_WINDOW_TILE_DATA_AREA_BIT) & 1 == 1;
-    }
-
-    fn get_bg_tile_map(&self, memory: &AddressSpace) -> bool {
-        return (memory.read(LCDC_ADDR) >> LCDC_BG_TILE_MAP_BIT) & 1 == 1;
-    }
-
-    fn get_obj_size(&self, memory: &AddressSpace) -> bool {
-        return (memory.read(LCDC_ADDR) >> LCDC_OBJ_SIZE_BIT) & 1 == 1;
-    }
-
-    fn get_ppu_enabled(&self, memory: &AddressSpace) -> bool {
-        return (memory.read(LCDC_ADDR) >> LCDC_PPU_ENABLE_BIT) & 1 == 1;
-    }
-
-    fn get_obj_enabled(&self, memory: &AddressSpace) -> bool {
-        return (memory.read(LCDC_ADDR) >> LCDC_OBJ_ENABLE_BIT) & 1 == 1;
-    }
-
-    fn scx(&self, memory: &AddressSpace) -> usize {
-        return memory.read(SCX_ADDR) as usize;
-    }
-
-    fn scy(&self, memory: &AddressSpace) -> usize {
-        return memory.read(SCY_ADDR) as usize;
-    }
-
-    fn wx(&self, memory: &AddressSpace) -> usize {
-        return memory.read(WX_ADDR) as usize;
-    }
-
-    fn wy(&self, memory: &AddressSpace) -> usize {
-        return memory.read(WY_ADDR) as usize;
-    }
-
-    fn window_enabled(&self, memory: &AddressSpace) -> bool {
-        let lcdc = memory.read(LCDC_ADDR);
-        let win_en = (lcdc >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
-        let win_gb_en = self.get_bg_win_display(memory);
-        return win_en && win_gb_en;
-    }
-
     fn check_stat_irq(&self, memory: &AddressSpace) -> bool {
         let value = memory.read(STAT_ADDR);
         let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
@@ -136,7 +137,7 @@ impl PPU {
     
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {
-        if !self.get_ppu_enabled(memory) {
+        if !get_ppu_enabled(memory) {
             // self.mode = PPUMode::HBlank;
             self.stat_flag = false;
             // memory.ppu_write_LY(0);
@@ -176,7 +177,7 @@ impl PPU {
         }
         match self.mode {
             PPUMode::OAMScan => {
-                if !self.render_window_on_cur_frame && self.ly == self.wy(memory) as u8 && self.window_enabled(memory) {
+                if !self.render_window_on_cur_frame && self.ly == wy(memory) as u8 && window_enabled(memory) {
                     self.render_window_on_cur_frame = true;
                     self.wly = 0;
                 }
@@ -196,8 +197,8 @@ impl PPU {
                 if self.dot == 80 {
                     self.mode = PPUMode::Drawing;
 
-                    let sprite_height: u8 = if self.get_obj_size(memory) == false {8} else {16};
-                    let sprites_disabled = !self.get_obj_enabled(memory);
+                    let sprite_height: u8 = if get_obj_size(memory) == false {8} else {16};
+                    let sprites_disabled = !get_obj_enabled(memory);
 
                     for sprite_i in 0..40 {
                         let sprite = SpriteData::new((sprite_i * 4) as u8, memory);
@@ -238,7 +239,7 @@ impl PPU {
                         memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
                     } else { 
-                        if self.render_window_on_cur_frame && self.wx(memory) <= 166 {
+                        if self.render_window_on_cur_frame && wx(memory) <= 166 {
                             self.wly += 1;
                         }
                         self.mode = PPUMode::OAMScan;
@@ -312,14 +313,14 @@ impl PPU {
 
     fn _get_background_tile_map(&self, memory: &AddressSpace) -> ([[u16; 32]; 32], HashSet<u16>) {
         let mut tile_map = [[0u16; 32]; 32];
-        let tile_map_base_address = if self.get_bg_tile_map(memory) { 0x9C00 } else { 0x9800 };
+        let tile_map_base_address = if get_bg_tile_map(memory) { 0x9C00 } else { 0x9800 };
         let mut unique_tiles: HashSet<u16> = HashSet::new();
         for tile_map_idx in 0..1024 {
             let tile_x = tile_map_idx % 32;
             let tile_y = tile_map_idx / 32;
             let tile_offset = memory.read(tile_map_base_address + tile_map_idx) as u16;
             let tile_address;
-            if self.get_bg_win_tile_data_zone(memory) {
+            if get_bg_win_tile_data_zone(memory) {
                 tile_address = 0x8000 + tile_offset * 16;
             } else {
                 tile_address = (0x8800 + ((tile_offset as i32) - 128) * 16) as u16
@@ -367,13 +368,13 @@ impl PPU {
     fn show(&mut self, memory: &AddressSpace) {
         let line_j = self.ly as usize;
 
-        let bg_tile_map_base_address: u16 = if self.get_bg_tile_map(memory) { 0x9C00 } else { 0x9800 };
-        let win_tile_map_base_address: u16 = if self.get_win_tile_map(memory) { 0x9C00 } else { 0x9800 };
-        let direct_data_zone = self.get_bg_win_tile_data_zone(memory);
+        let bg_tile_map_base_address: u16 = if get_bg_tile_map(memory) { 0x9C00 } else { 0x9800 };
+        let win_tile_map_base_address: u16 = if get_win_tile_map(memory) { 0x9C00 } else { 0x9800 };
+        let direct_data_zone = get_bg_win_tile_data_zone(memory);
 
         self.line_objects.sort_by(|a, b| a.cmp(b));
 
-        let sprite_height: usize = if self.get_obj_size(memory) == false {8} else {16};
+        let sprite_height: usize = if get_obj_size(memory) == false {8} else {16};
 
         let BPG = memory.read(BGP_ADDR);
         let OBP0 = memory.read(OBP0_ADDR);
@@ -384,11 +385,11 @@ impl PPU {
         let obp1_palette = make_palette(OBP1);
 
         // let window_x_condition = self.wx(memory) <= 166;
-        let win_x = self.wx(memory);
+        let win_x = wx(memory);
         let win_enabled = (memory.read(LCDC_ADDR) >> LCDC_WINDOW_ENABLE_BIT) & 1 == 1;
 
-        let view_y0 = self.scy(memory);
-        let view_x0 = self.scx(memory);
+        let view_y0 = scy(memory);
+        let view_x0 = scx(memory);
 
 
         let margin_x = 256 - view_x0;
@@ -404,7 +405,7 @@ impl PPU {
                 let tile_y = src_row / 8;
                 let tile_offset_y = src_row % 8;
 
-                let col_row = i + 7 - self.wx(memory);
+                let col_row = i + 7 - wx(memory);
                 let tile_x = col_row / 8;
                 let tile_offset_x = col_row % 8;
 
@@ -501,7 +502,7 @@ impl PPU {
             let color_palette: ColorPalette;
             if sprite_pixel.is_some() {
                 let (sprite_color, sprite_palette, sprite_prio) = sprite_pixel.unwrap();
-                if self.get_bg_win_display(memory) {
+                if get_bg_win_display(memory) {
                     if sprite_color == 0 {
                         color = bg_color;
                         color_palette = ColorPalette::BPG;
@@ -517,7 +518,7 @@ impl PPU {
                     color_palette = sprite_palette;
                 }
             } else {
-                if self.get_bg_win_display(memory) {
+                if get_bg_win_display(memory) {
                     color = bg_color;
                     color_palette = ColorPalette::BPG;
                 } else {
