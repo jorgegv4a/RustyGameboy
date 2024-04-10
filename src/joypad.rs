@@ -83,9 +83,14 @@ impl Joypad {
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) -> bool {
-        let x_ = self.event_pump.poll_iter();
+        // let x_ = self.event_pump.poll_iter();
         self.ticks += nticks as u64;
         if self.ticks >= 7022 {
+            for event in self.event_pump.poll_iter() {
+                match event {
+                    _ => {}
+                }
+            }
             self.ticks = self.ticks % 7022;
             self.update_state(memory);
             self.update_memory(memory);

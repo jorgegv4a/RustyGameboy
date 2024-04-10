@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::time::Duration;
+use sdl2::audio::{AudioCallback, AudioSpecDesired};
 
 use crate::constants::{IF_ADDR, IE_ADDR, SB_ADDR, SC_ADDR};
 use crate::cpu::{CPU, DEBUG};
@@ -8,12 +10,15 @@ use crate::memory::AddressSpace;
 use crate::graphics::PPU;
 use crate::interrupt::Interrupt;
 use crate::joypad::Joypad;
+use crate::sound::APU;
+
 
 pub struct Gameboy {
     cpu: CPU,
     memory: AddressSpace,
     ppu: PPU,
     joypad: Joypad,
+    apu: APU,
 }
 
 impl Gameboy {
@@ -21,11 +26,15 @@ impl Gameboy {
         let sdl_context = sdl2::init().unwrap();
         let video_subsystem = sdl_context.video().unwrap();
         let mut event_pump = sdl_context.event_pump().unwrap();
+
+        let audio_subsystem = sdl_context.audio().unwrap();
+
         Gameboy {
             cpu: CPU::new(),
             memory: AddressSpace::new(),
             ppu: PPU::new(video_subsystem, 3.0),
             joypad: Joypad::new(event_pump),
+            apu: APU::new(audio_subsystem),
         }
     }
 
@@ -103,6 +112,7 @@ impl Gameboy {
             self.ppu.tick(nticks, &mut self.memory);
             let quit = self.joypad.tick(nticks, &mut self.memory);
             self.memory.tick(nticks);
+            self.apu.tick(nticks, &mut self.memory);
             if self.memory.read(SC_ADDR) == 0x81 {
                 if !DEBUG {
                     print!("{}", std::char::from_u32(self.memory.read(SB_ADDR) as u32).unwrap_or('?'));

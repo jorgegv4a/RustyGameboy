@@ -108,6 +108,14 @@ impl AddressSpace {
             idx @ 0xFF01..=0xFF4B => {
                 if idx == DIV_ADDR {
                     (self.internal_div >> 8) as u8
+                } else if idx == NR11_ADDR || idx == NR21_ADDR {
+                    self.standard_io[index as usize - 0xFF00] & 0xC0
+                } else if idx == NR13_ADDR || idx == NR23_ADDR || idx == NR33_ADDR {
+                    0xFF
+                } else if idx == NR14_ADDR || idx == NR24_ADDR || idx == NR34_ADDR || idx == NR44_ADDR{
+                    self.standard_io[index as usize - 0xFF00] & 0x40
+                } else if idx == NR31_ADDR || idx == NR41_ADDR {
+                    0xFF
                 } else {
                     self.standard_io[index as usize - 0xFF00]
                 }
@@ -153,14 +161,18 @@ impl AddressSpace {
                     self.standard_io[index as usize - 0xFF00] = (value & 0x78) | (self.standard_io[index as usize - 0xFF00] & 0x07)
                 } else if idx == LCDY_ADDR {
                     ()
-                } else if idx == SCX_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = value;
-                } else if idx == LCDC_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = value;
                 } else if idx == DIV_ADDR {
                     self.internal_div = 0
-                } else if idx == SB_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = value
+
+                } else if idx == NR52_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value & 0x8 | (self.standard_io[index as usize - 0xFF00] & 0xF)
+
+                } else if idx == NR11_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC) | value & 0x3F
+
+                } else if idx == NR21_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC) | value & 0x3F
+
                 } else {
                     self.standard_io[index as usize - 0xFF00] = value
                 }
@@ -227,8 +239,12 @@ impl AddressSpace {
         self.standard_io[STAT_ADDR as usize - 0xFF00] = stat_value;
     }
 
-    pub fn _ppu_write_LY(&mut self, ly_value: u8) {
-        self.standard_io[LCDY_ADDR as usize - 0xFF00] = ly_value;
+    pub fn apu_read(&self, index: u16) -> u8 {
+        if index == NR11_ADDR || index == NR21_ADDR || index == NR13_ADDR || index == NR23_ADDR || index == NR33_ADDR || index == NR14_ADDR || index == NR24_ADDR || index == NR34_ADDR || index == NR44_ADDR || index == NR31_ADDR || index == NR41_ADDR {
+            self.standard_io[index as usize - 0xFF00]
+        } else {
+            panic!("Invalid index read from apu: {index}")
+        }
     }
 
     pub fn joypad_write(&mut self, state: u8) {

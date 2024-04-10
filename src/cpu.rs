@@ -3,8 +3,7 @@ use core::panic;
 
 use crate::registers::RegisterBank;
 use crate::memory::AddressSpace;
-use crate::opcodes::{get_opcodes, Opcode};
-use serde_json::Value;
+use crate::opcodes::{get_instr, Opcode};
 
 pub const DEBUG: bool = false;
 // pub const DEBUG: bool = true;
@@ -68,7 +67,6 @@ pub struct CPU {
     pub master_interrupt_enable: bool,
     pub enable_interrupts_next_instr: bool,
     clock: u64,
-    opcodes: Value,
     halted: bool,
 }
 
@@ -93,10 +91,6 @@ impl CPU {
             master_interrupt_enable: false,
             enable_interrupts_next_instr: false,
             clock: 0,
-            opcodes: match get_opcodes() {
-                Ok(x) => x,
-                Err(x) => panic!("Couldn't load opcodes: {}", x),
-            },
             halted: false,
         }
     }
@@ -179,10 +173,12 @@ impl CPU {
         if opcode_byte == 0xCB {
             let opcode_lower = self.fetch(memory) as u16;
             let opcode = ((opcode_byte as u16) << 8) | opcode_lower;
-            let opcode_dict: Opcode = serde_json::from_value(self.opcodes["cbprefixed"][format!("0x{:02x}", opcode_byte)].to_owned()).unwrap();
+            // let opcode_dict: Opcode = serde_json::from_value(self.opcodes["cbprefixed"][format!("0x{:02x}", opcode_byte)].to_owned()).unwrap();
+            let opcode_dict = get_instr(opcode).unwrap();
             (opcode_dict, opcode)
         } else {
-            let opcode_dict: Opcode = serde_json::from_value(self.opcodes["unprefixed"][format!("0x{:02x}", opcode_byte)].to_owned()).unwrap();
+            // let opcode_dict: Opcode = serde_json::from_value(self.opcodes["unprefixed"][format!("0x{:02x}", opcode_byte)].to_owned()).unwrap();
+            let opcode_dict = get_instr(opcode_byte as u16).unwrap();
             (opcode_dict, opcode_byte as u16)
         }
     }
@@ -197,6 +193,10 @@ impl CPU {
         let mut extra_bytes: Vec<u8> = Vec::new();
         for _ in 0..code_length {
             extra_bytes.push(self.fetch(&memory));
+        }
+
+        if opcode == 0x40 {
+            println!()
         }
 
         let mut remaining_cycles = opcode_dict.cycles[0] - ((self.clock - start_clock_t) as u8);
