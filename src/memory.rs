@@ -165,13 +165,31 @@ impl AddressSpace {
                     self.internal_div = 0
 
                 } else if idx == NR52_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = value & 0x8 | (self.standard_io[index as usize - 0xFF00] & 0xF)
+                    self.standard_io[index as usize - 0xFF00] = value & 0x80 | (self.standard_io[index as usize - 0xFF00] & 0xF);
+
+                } else if idx == NR51_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+
+                } else if idx == NR50_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+
+                } else if idx == NR30_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+
+                } else if idx == NR31_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+
+                } else if idx == NR32_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+
+                } else if idx == NR34_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
 
                 } else if idx == NR11_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC) | value & 0x3F
+                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC0) | value & 0x3F
 
                 } else if idx == NR21_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC) | value & 0x3F
+                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC0) | value & 0x3F
 
                 } else {
                     self.standard_io[index as usize - 0xFF00] = value

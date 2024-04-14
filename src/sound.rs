@@ -2,7 +2,7 @@ extern crate sdl2;
 
 use sdl2::libc::sleep;
 use sdl2::AudioSubsystem;
-use sdl2::audio::{AudioCallback, AudioDevice, AudioQueue, AudioSpecDesired};
+use sdl2::audio::{AudioCallback, AudioDevice, AudioQueue, AudioSpecDesired, AudioStatus};
 use std::sync::mpsc;
 use std::sync::mpsc::{Sender, Receiver, SyncSender};
 
@@ -45,7 +45,7 @@ enum LFSRWidth {
 }
 
 struct PulseWave {
-    in_samples: Receiver<[u8; AUDIO_BUFFER_NUM_SAMPLES]>,
+    in_samples: Receiver<[f32; 2*AUDIO_BUFFER_NUM_SAMPLES]>,
     phase_inc: f32,
     phase: f32,
     volume: f32,
@@ -58,35 +58,16 @@ impl AudioCallback for PulseWave {
     type Channel = f32;
 
     fn callback(&mut self, out: &mut [f32]) {
-        // if let Ok(buffer) = self.in_samples.try_recv() {
-        //     println!("Callback recv");
-        //     for (i, x) in out.iter_mut().enumerate() {
-        //         // println!("Raw Sample value: {}, converted to {}", buffer[i], *x);
-        //         *x = (buffer[i] as f32 / 7.5) - 1.0;
-        //     }
-
-        //     // let buffer_time = self.last_buffer_time.elapsed().as_secs_f64();
-        //     // println!("buffer_time: {}", buffer_time * 1000.0);
-        //     // self.last_buffer_time = std::time::Instant::now();
-        // } 
-        // // else {
-        // //     println!("Callback waiting on buffer");
-        // //     for (i, x) in out.iter_mut().enumerate() {
-        // //         *x = 0.0;
-        // //     }
-        // // }
         match self.in_samples.recv_timeout(std::time::Duration::from_secs_f32(0.030)) {
             Ok(buffer) => {
-                println!("Callback recv");
+                // println!("Callback recv");
                 for (i, x) in out.iter_mut().enumerate() {
-                    // println!("Raw Sample value: {}, converted to {}", buffer[i], *x);
-                    *x = (buffer[i] as f32 / 7.5) - 1.0;
+                    *x = buffer[i];
                 }
             },
             Err(s) => {
                 println!("Failed to receive");
                 for (i, x) in out.iter_mut().enumerate() {
-                    // println!("Raw Sample value: {}, converted to {}", buffer[i], *x);
                     *x = 0.0;
                 }
             },
@@ -129,7 +110,7 @@ pub struct APU {
     period_step: u32,
     latched_ch3_period: f32,
     clock: u64,
-    out_samples: Sender<[u8; AUDIO_BUFFER_NUM_SAMPLES]>,
+    out_samples: Sender<[f32; 2*AUDIO_BUFFER_NUM_SAMPLES]>,
     // out_samples: SyncSender<[u8; AUDIO_BUFFER_NUM_SAMPLES]>,
     buffer: [u8; AUDIO_BUFFER_NUM_SAMPLES],
     buffer_i: usize,
@@ -143,14 +124,12 @@ impl APU {
     pub fn new(audio_subsystem: AudioSubsystem) -> APU {
         let desired_spec = AudioSpecDesired {
             freq: Some(TARGET_SAMPLE_RATE as i32),
-            channels: Some(1),  // mono
+            channels: Some(2),  // stereo
             samples: Some(AUDIO_BUFFER_NUM_SAMPLES as u16),       // default sample size
         };
 
-        let (tx, rx): (Sender<[u8; AUDIO_BUFFER_NUM_SAMPLES]>, Receiver<[u8; AUDIO_BUFFER_NUM_SAMPLES]>) = mpsc::channel();
-        // let (tx, rx): (SyncSender<[u8; AUDIO_BUFFER_NUM_SAMPLES]>, Receiver<[u8; AUDIO_BUFFER_NUM_SAMPLES]>) = mpsc::sync_channel(12);
+        let (tx, rx): (Sender<[f32; 2*AUDIO_BUFFER_NUM_SAMPLES]>, Receiver<[f32; 2*AUDIO_BUFFER_NUM_SAMPLES]>) = mpsc::channel();
         
-        // let device: AudioQueue<f32> = audio_subsystem.open_queue(None, &desired_spec).unwrap();
         let device = audio_subsystem.open_playback(None, &desired_spec, |spec| {
             PulseWave {
                 in_samples: rx,
@@ -162,12 +141,6 @@ impl APU {
                 last_buffer_time: std::time::Instant::now(),
             }
         }).unwrap();
-
-        // // Start playback
-        device.resume();
-
-
-        // std::thread::sleep(std::time::Duration::from_millis(3000));
 
         let filename = std::path::Path::new("CH3_out_pkmred.txt");
         if filename.exists() {
@@ -197,25 +170,6 @@ impl APU {
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {
         if self.div_apu & 2 == 0 {
-            // if ch3_trigger(memory) && !self.ch3.on {
-            //     if ch3_dac_on(memory) {
-            //         // C3 Has just been triggered!
-            //         self.ch3.on = true;
-            //     } else { 
-            //         self.ch3.on = false;
-            //     }
-            // } else {
-            //     self.ch3.on = false;
-            // }
-            // set_ch3_on(self.ch3.on, memory);
-
-            // if ch3_on(memory) {
-            //     println!("ON");
-            //     if ch3_length_enable(memory) && !self.ch3.length_enabled {
-            //         self.ch3.length_enabled = true;
-            //         self.ch3.length = ch3_initial_len(memory);
-            //     }
-            // }
             if self.ch3.on && self.ch3.length_enabled {
                 self.ch3.length_i += 1;
                 println!("Length step: {}", self.ch3.length_i);
@@ -240,7 +194,6 @@ impl APU {
             self.ch3_sample_index = (self.ch3_sample_index + 1) % 32;
             self.latched_ch3_period = 2048.0 - ((ch3_initial_period_high(memory) as f32) * 256.0 + ch3_initial_period_low(memory) as f32);
             self.period_step = 0;
-            // println!("Wave period: {}, tonal freq: {}", self.latched_ch3_period, 2097152.0 / (32.0 * self.latched_ch3_period as f32))
         } else {
             return None;
         }
@@ -284,12 +237,7 @@ impl APU {
             }
             period = self.latched_ch3_period;
         } else {
-            // if self.buffer_i > 0 {
-            //     wave_value = self.buffer[self.buffer_i - 1];
-            // } else {
-            //     wave_value = self.buffer[self.buffer.len() - 1];
-            // }
-            wave_value = 0;
+            wave_value = 255;
             period = 1.0;
         }
 
@@ -299,29 +247,38 @@ impl APU {
         if self.resample_frac >= 1.0 {
             self.resample_frac -= 1.0;
             sampling_ratio += 1.0;
-            // if self.buffer_i > 0 {
-            //     self.buffer[self.buffer_i] = self.buffer[self.buffer_i - 1];
-            // } else {
-            //     self.buffer[self.buffer_i] = self.buffer[self.buffer.len() - 1];
-            // }
-            // self.buffer_i += 1;
-            // if self.buffer_i == self.buffer.len() {
-            //     self.buffer_i = 0;
-            //     let outcome = self.out_samples.send(self.buffer);
-            // }
         }
         let num_rep_samples = sampling_ratio.floor() as u32;
 
         for _ in 0..num_rep_samples {
             self.buffer[self.buffer_i] = wave_value;
-            // let f_value = (wave_value as f32 / 7.5) - 1.0; 
-            let f_value: f32 = if ch3_on(memory) {1.0} else {0.0}; 
+            // let f_value = (wave_value as f32 / -7.5) + 1.0; 
+            // let f_value: f32 = if ch3_on(memory) {1.0} else {0.0}; 
             // write!(self.debug_file, "{}", f_value);
-            self.debug_file.write_all(&f_value.to_be_bytes());
+            // self.debug_file.write_all(&f_value.to_be_bytes());
             self.buffer_i += 1;
             if self.buffer_i == self.buffer.len() {
                 self.buffer_i = 0;
-                let outcome = self.out_samples.send(self.buffer);
+                let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
+                for (i, x) in self.buffer.iter().enumerate() {
+                    let wave_analog;
+                    if *x == 255{
+                        wave_analog = 0.0;
+                    } else {
+                        wave_analog = (*x as f32 / -7.5) + 1.0;
+                    }
+                    if ch3_pan_right(memory) {
+                        analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
+                    } else {
+                        analog_buffer[2 * i + 1] = 0.0;
+                    }
+                    if ch3_pan_left(memory) {
+                        analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
+                    } else {
+                        analog_buffer[2 * i] = 0.0;
+                    }
+                }
+                let outcome = self.out_samples.send(analog_buffer);
                 // match outcome {
                 //     Ok(x) => println!("Send {}", wave_value),
                 //     Err(s) => println!("Send Error: {s}"),
@@ -331,6 +288,21 @@ impl APU {
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
+        let device_status = self.device.status();
+        if !apu_enabled(memory) {
+            if device_status == AudioStatus::Playing {
+                // Pause playback
+                self.device.pause();
+                // println!("Playback paused");
+            }
+            return;
+        } else {
+            if apu_enabled(memory) && device_status != AudioStatus::Playing {
+                // Start playback
+                self.device.resume();
+                // println!("Playback enabled");
+            }
+        }
         let div = (memory.read(DIV_ADDR) >> 4) & 1;
         if div == 1 && self.latched_div.unwrap_or(0) == 1 {
             self.div_apu += 1; // ticks at 512 Hz

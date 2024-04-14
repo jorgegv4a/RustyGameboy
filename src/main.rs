@@ -10,6 +10,7 @@ mod interrupt;
 mod joypad;
 mod sprites;
 mod mappers;
+mod sound;
 
 use std::path::Path;
 // 
