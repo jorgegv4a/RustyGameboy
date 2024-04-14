@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 
 use crate::constants::{IF_ADDR, IE_ADDR, SB_ADDR, SC_ADDR};
@@ -84,6 +84,7 @@ impl Gameboy {
     pub fn power_on(&mut self) {
         self.cpu.boot(&mut self.memory);
         loop {
+            let t0 = Instant::now();
             if DEBUG {
                 println!("{}", self.cpu);
             }

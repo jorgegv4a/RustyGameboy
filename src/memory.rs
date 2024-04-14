@@ -240,11 +240,15 @@ impl AddressSpace {
     }
 
     pub fn apu_read(&self, index: u16) -> u8 {
-        if index == NR11_ADDR || index == NR21_ADDR || index == NR13_ADDR || index == NR23_ADDR || index == NR33_ADDR || index == NR14_ADDR || index == NR24_ADDR || index == NR34_ADDR || index == NR44_ADDR || index == NR31_ADDR || index == NR41_ADDR {
+        if index == NR52_ADDR || index == NR11_ADDR || index == NR21_ADDR || index == NR13_ADDR || index == NR23_ADDR || index == NR33_ADDR || index == NR14_ADDR || index == NR24_ADDR || index == NR34_ADDR || index == NR44_ADDR || index == NR31_ADDR || index == NR41_ADDR {
             self.standard_io[index as usize - 0xFF00]
         } else {
-            panic!("Invalid index read from apu: {index}")
+            panic!("Invalid index read from apu: {index:04X}")
         }
+    }
+
+    pub fn apu_write_nr52(&mut self, value: u8) {
+        self.standard_io[NR52_ADDR as usize - 0xFF00] = value & 0xF | (self.standard_io[NR52_ADDR as usize - 0xFF00] & 0x80);
     }
 
     pub fn joypad_write(&mut self, state: u8) {

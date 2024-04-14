@@ -185,11 +185,12 @@ impl PPU {
                     memory.ppu_write_LY_update_STAT(self.ly);
                     if self.ly == 0 {
                         let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
-                        let fps = 1.0 / frame_time_seconds;
-                        if frame_time_seconds < 1.0 / 60.0 {
-                            let diff = 1.0 / 60.0 - frame_time_seconds;
-                            std::thread::sleep(Duration::from_secs_f64(diff));
+                        let time_to_wait = 1.0/59.7 - frame_time_seconds - 0.00006;
+                        if time_to_wait > 0.0 {
+                            std::thread::sleep(Duration::from_secs_f64(time_to_wait));
                         }
+                        let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
+                        let fps = 1.0 / frame_time_seconds;
                         println!("Frame time: {:.3} ms, FPS: {fps:.1}", frame_time_seconds * 1000.0);
                         self.frame_start_t = Instant::now();
                     }
