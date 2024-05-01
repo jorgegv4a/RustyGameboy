@@ -143,7 +143,7 @@ pub struct APU {
     clock: u64,
     out_samples: Sender<[f32; 2*AUDIO_BUFFER_NUM_SAMPLES]>,
     // out_samples: SyncSender<[u8; AUDIO_BUFFER_NUM_SAMPLES]>,
-    buffer: [u8; AUDIO_BUFFER_NUM_SAMPLES],
+    buffer: [f32; 2 * AUDIO_BUFFER_NUM_SAMPLES],
     buffer_i: usize,
     debug_file: File,
     debug_file2: File,
@@ -151,6 +151,8 @@ pub struct APU {
     debug_file4: File,
     frame_sequencer_i: u8,
     start_time: std::time::Instant,
+    last_ch1_sample: u8,
+    last_ch2_sample: u8,
 }
 
 
@@ -205,7 +207,7 @@ impl APU {
             ch3: Channel::new(),
             clock: 0,
             out_samples: tx,
-            buffer: [0; AUDIO_BUFFER_NUM_SAMPLES],
+            buffer: [0f32; 2 * AUDIO_BUFFER_NUM_SAMPLES],
             buffer_i: 0,
             debug_file: file,
             debug_file2: file2,
@@ -213,6 +215,8 @@ impl APU {
             debug_file4: file4,
             frame_sequencer_i: 0,
             start_time: std::time::Instant::now(),
+            last_ch1_sample: 255,
+            last_ch2_sample: 255,
         }
     }
 
@@ -464,7 +468,7 @@ impl APU {
         }
     }
 
-    pub fn ch1_tick(&mut self, memory: &mut AddressSpace) {
+    pub fn ch1_tick(&mut self, memory: &mut AddressSpace) -> Option<u8> {
         if self.ch1.negative_sweep_calc_executed && ch1_sweep_direction(memory) == SweepDirection::Inc {
             self.ch1.on = false;
             set_ch1_on(self.ch1.on, memory);
@@ -526,41 +530,47 @@ impl APU {
         }
 
         // Fill buffer with raw sample rate, when enough samples collected resample to 44100
-        let mut sampling_ratio = TARGET_SAMPLE_RATE as f32 / 1048576.0;
+        let sampling_ratio = TARGET_SAMPLE_RATE as f32 / 1048576.0;
         self.ch1.resample_frac += sampling_ratio.fract();
         if self.ch1.resample_frac >= 1.0 {
             self.ch1.resample_frac -= 1.0;
-            sampling_ratio += 1.0;
             println!("[{:?}] Generating 1 sample of period {} (value {wave_value}, vol: {})", self.start_time.elapsed().as_secs_f32(), self.ch1.period, self.ch1.volume);
+            // if wave_value == 255 {
+            //     self.buffer[self.buffer_i] = wave_value;
+            // } else {
+            //     self.buffer[self.buffer_i] = wave_value * self.ch1.volume;
+            // }
+            // self.buffer_i += 1;
+            // if self.buffer_i == self.buffer.len() {
+            //     self.buffer_i = 0;
+            //     let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
+            //     for (i, x) in self.buffer.iter().enumerate() {
+            //         let wave_analog = self.ch1.buffer_to_analog(*x);
+            //         if ch1_pan_right(memory) {
+            //             analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
+            //         } else {
+            //             analog_buffer[2 * i + 1] = 0.0;
+            //         }
+            //         if ch1_pan_left(memory) {
+            //             analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
+            //         } else {
+            //             analog_buffer[2 * i] = 0.0;
+            //         }
+            //         self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
+            //     }
+            //     let outcome = self.out_samples.send(analog_buffer);
+            // }
             if wave_value == 255 {
-                self.buffer[self.buffer_i] = wave_value;
+                Some(wave_value)
             } else {
-                self.buffer[self.buffer_i] = wave_value * self.ch1.volume;
+                Some(wave_value * self.ch1.volume)
             }
-            self.buffer_i += 1;
-            if self.buffer_i == self.buffer.len() {
-                self.buffer_i = 0;
-                let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
-                for (i, x) in self.buffer.iter().enumerate() {
-                    let wave_analog = self.ch1.buffer_to_analog(*x);
-                    if ch1_pan_right(memory) {
-                        analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
-                    } else {
-                        analog_buffer[2 * i + 1] = 0.0;
-                    }
-                    if ch1_pan_left(memory) {
-                        analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
-                    } else {
-                        analog_buffer[2 * i] = 0.0;
-                    }
-                    self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
-                }
-                let outcome = self.out_samples.send(analog_buffer);
-            }
+        } else {
+            None
         }
     }
 
-    pub fn ch2_tick(&mut self, memory: &mut AddressSpace) {
+    pub fn ch2_tick(&mut self, memory: &mut AddressSpace) -> Option<u8> {
         if ch2_dac_on(memory) {
             if ch2_trigger(memory) {        
                 let period_low = ch2_initial_period_low(memory);
@@ -604,38 +614,44 @@ impl APU {
         }
 
         // Fill buffer with raw sample rate, when enough samples collected resample to 44100
-        let mut sampling_ratio = TARGET_SAMPLE_RATE as f32 / 1048576.0;
+        let sampling_ratio = TARGET_SAMPLE_RATE as f32 / 1048576.0;
         self.ch2.resample_frac += sampling_ratio.fract();
         if self.ch2.resample_frac >= 1.0 {
             self.ch2.resample_frac -= 1.0;
-            sampling_ratio += 1.0;
             println!("[{:?}] Generating 1 sample of period {} (value {wave_value}, vol: {})", self.start_time.elapsed().as_secs_f32(), self.ch2.period, self.ch2.volume);
 
+            // if wave_value == 255 {
+            //     self.buffer[self.buffer_i] = wave_value;
+            // } else {
+            //     self.buffer[self.buffer_i] = wave_value * self.ch2.volume;
+            // }
+            // self.buffer_i += 1;
+            // if self.buffer_i == self.buffer.len() {
+            //     self.buffer_i = 0;
+            //     let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
+            //     for (i, x) in self.buffer.iter().enumerate() {
+            //         let wave_analog = self.ch2.buffer_to_analog(*x);
+            //         if ch2_pan_right(memory) {
+            //             analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
+            //         } else {
+            //             analog_buffer[2 * i + 1] = 0.0;
+            //         }
+            //         if ch2_pan_left(memory) {
+            //             analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
+            //         } else {
+            //             analog_buffer[2 * i] = 0.0;
+            //         }
+            //         self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
+            //     }
+            //     let outcome = self.out_samples.send(analog_buffer);
+            // }
             if wave_value == 255 {
-                self.buffer[self.buffer_i] = wave_value;
+                Some(wave_value)
             } else {
-                self.buffer[self.buffer_i] = wave_value * self.ch2.volume;
+                Some(wave_value * self.ch2.volume)
             }
-            self.buffer_i += 1;
-            if self.buffer_i == self.buffer.len() {
-                self.buffer_i = 0;
-                let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
-                for (i, x) in self.buffer.iter().enumerate() {
-                    let wave_analog = self.ch2.buffer_to_analog(*x);
-                    if ch2_pan_right(memory) {
-                        analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
-                    } else {
-                        analog_buffer[2 * i + 1] = 0.0;
-                    }
-                    if ch2_pan_left(memory) {
-                        analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
-                    } else {
-                        analog_buffer[2 * i] = 0.0;
-                    }
-                    self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
-                }
-                let outcome = self.out_samples.send(analog_buffer);
-            }
+        } else {
+            None
         }
     }
 
@@ -664,33 +680,32 @@ impl APU {
             wave_value = 255;
         }
 
-        let mut sampling_ratio = TARGET_SAMPLE_RATE as f32 / 2097152.0;
+        let sampling_ratio = TARGET_SAMPLE_RATE as f32 / 2097152.0;
         self.ch3.resample_frac += sampling_ratio.fract();
-        if self.ch3.resample_frac >= 1.0 {
-            self.ch3.resample_frac -= 1.0;
-            sampling_ratio += 1.0;
+        // if self.ch3.resample_frac >= 1.0 {
+        //     self.ch3.resample_frac -= 1.0;
 
-            self.buffer[self.buffer_i] = wave_value;
-            self.buffer_i += 1;
-            if self.buffer_i == self.buffer.len() {
-                self.buffer_i = 0;
-                let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
-                for (i, x) in self.buffer.iter().enumerate() {
-                    let wave_analog = self.ch3.buffer_to_analog(*x);
-                    if ch3_pan_right(memory) {
-                        analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
-                    } else {
-                        analog_buffer[2 * i + 1] = 0.0;
-                    }
-                    if ch3_pan_left(memory) {
-                        analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
-                    } else {
-                        analog_buffer[2 * i] = 0.0;
-                    }
-                }
-                let outcome = self.out_samples.send(analog_buffer);
-            }
-        }
+        //     self.buffer[self.buffer_i] = wave_value;
+        //     self.buffer_i += 1;
+        //     if self.buffer_i == self.buffer.len() {
+        //         self.buffer_i = 0;
+        //         let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
+        //         for (i, x) in self.buffer.iter().enumerate() {
+        //             let wave_analog = self.ch3.buffer_to_analog(*x);
+        //             if ch3_pan_right(memory) {
+        //                 analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
+        //             } else {
+        //                 analog_buffer[2 * i + 1] = 0.0;
+        //             }
+        //             if ch3_pan_left(memory) {
+        //                 analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
+        //             } else {
+        //                 analog_buffer[2 * i] = 0.0;
+        //             }
+        //         }
+        //         let outcome = self.out_samples.send(analog_buffer);
+        //     }
+        // }
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
@@ -725,9 +740,49 @@ impl APU {
             //     self.ch3_tick(memory);
             // }
             if self.clock % 4 == 0 {
-                // self.ch1_tick(memory);
-                self.ch2_tick(memory);
+                let ch1_sample = self.ch1_tick(memory);
+                let ch2_sample = self.ch2_tick(memory);
+
+                if ch1_sample.is_some() {
+                    self.last_ch1_sample = ch1_sample.unwrap();
+                    self.last_ch2_sample = ch2_sample.unwrap();
+
+                    let ch1_analog = self.ch1.buffer_to_analog(ch1_sample.unwrap());
+                    let ch2_analog = self.ch2.buffer_to_analog(ch2_sample.unwrap());
+
+                    let mut left_analog: f32 = 0.0;
+                    let mut right_analog: f32 = 0.0;
+
+
+                    if ch1_pan_right(memory) {
+                        right_analog += ch1_analog;
+                    }
+                    if ch1_pan_left(memory) {
+                        left_analog += ch1_analog;
+                    }
+
+                    if ch2_pan_right(memory) {
+                        right_analog += ch2_analog;
+                    }
+                    if ch2_pan_left(memory) {
+                        left_analog += ch2_analog;
+                    }
+
+                    left_analog = (left_analog / 2.0) * ((master_left_volume(memory) + 1) as f32 / 8.0);
+                    right_analog = (right_analog / 2.0) * ((master_right_volume(memory) + 1) as f32 / 8.0);
+                    self.buffer[2 * self.buffer_i] = left_analog;
+                    self.buffer[2 * self.buffer_i + 1] = right_analog;
+
+                    self.debug_file.write_all(&self.buffer[2 * self.buffer_i].to_be_bytes());
+
+                    self.buffer_i += 1;
+                    if self.buffer_i == AUDIO_BUFFER_NUM_SAMPLES {
+                        self.buffer_i = 0;
+                        let outcome = self.out_samples.send(self.buffer.clone());
+                    }
+                }
             }
+            // TODO: continue mixing samples
             self.clock += 1;
             self.div = Some((div & 1) as u8);
         }
