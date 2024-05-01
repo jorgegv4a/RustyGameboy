@@ -532,21 +532,6 @@ impl APU {
             self.ch1.resample_frac -= 1.0;
             sampling_ratio += 1.0;
             println!("[{:?}] Generating 1 sample of period {} (value {wave_value}, vol: {})", self.start_time.elapsed().as_secs_f32(), self.ch1.period, self.ch1.volume);
-        // }
-        // let num_rep_samples = sampling_ratio.floor() as u32;
-        // if num_rep_samples > 0 {
-        //     println!("[{:?}]  Generating {num_rep_samples} samples of period {period}", self.start_time.elapsed().as_secs_f32());
-        // }
-
-        // for _ in 0..num_rep_samples {
-            // self.debug_file2.write_all(&(self.ch1.volume as f32 / 15.0).to_be_bytes());
-            // self.debug_file3.write_all(&(self.ch1.period as f32 / 2048.0).to_be_bytes());
-            // match ch1_wave_duty(memory) {
-            //     WaveDuty::Eight => self.debug_file4.write_all(&(1.0f32 / 8.0).to_be_bytes()),
-            //     WaveDuty::Quarter => self.debug_file4.write_all(&(1.0f32 / 4.0).to_be_bytes()),
-            //     WaveDuty::Half => self.debug_file4.write_all(&(1.0f32 / 2.0).to_be_bytes()),
-            //     WaveDuty::InvQuarter => self.debug_file4.write_all(&(3.0f32 / 4.0).to_be_bytes()),
-            // };
             if wave_value == 255 {
                 self.buffer[self.buffer_i] = wave_value;
             } else {
@@ -571,10 +556,6 @@ impl APU {
                     self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
                 }
                 let outcome = self.out_samples.send(analog_buffer);
-                // match outcome {
-                //     Ok(x) => println!("Send {}", wave_value),
-                //     Err(s) => println!("Send Error: {s}"),
-                // };
             }
         }
     }
@@ -629,21 +610,7 @@ impl APU {
             self.ch2.resample_frac -= 1.0;
             sampling_ratio += 1.0;
             println!("[{:?}] Generating 1 sample of period {} (value {wave_value}, vol: {})", self.start_time.elapsed().as_secs_f32(), self.ch2.period, self.ch2.volume);
-        // }
-        // let num_rep_samples = sampling_ratio.floor() as u32;
-        // if num_rep_samples > 0 {
-        //     println!("[{:?}]  Generating {num_rep_samples} samples of period {period}", self.start_time.elapsed().as_secs_f32());
-        // }
 
-        // for _ in 0..num_rep_samples {
-            // self.debug_file2.write_all(&(self.ch2.volume as f32 / 15.0).to_be_bytes());
-            // self.debug_file3.write_all(&(self.ch2.period as f32 / 2048.0).to_be_bytes());
-            // match ch2_wave_duty(memory) {
-            //     WaveDuty::Eight => self.debug_file4.write_all(&(1.0f32 / 8.0).to_be_bytes()),
-            //     WaveDuty::Quarter => self.debug_file4.write_all(&(1.0f32 / 4.0).to_be_bytes()),
-            //     WaveDuty::Half => self.debug_file4.write_all(&(1.0f32 / 2.0).to_be_bytes()),
-            //     WaveDuty::InvQuarter => self.debug_file4.write_all(&(3.0f32 / 4.0).to_be_bytes()),
-            // };
             if wave_value == 255 {
                 self.buffer[self.buffer_i] = wave_value;
             } else {
@@ -668,10 +635,6 @@ impl APU {
                     self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
                 }
                 let outcome = self.out_samples.send(analog_buffer);
-                // match outcome {
-                //     Ok(x) => println!("Send {}", wave_value),
-                //     Err(s) => println!("Send Error: {s}"),
-                // };
             }
         }
     }
@@ -690,7 +653,6 @@ impl APU {
         let wave_value;
 
         if self.ch3.on {
-            // println!("ON");
             if ch3_length_enable(memory) && !self.ch3.length_enabled {
                 self.ch3.length_enabled = true;
                 self.ch3.length_i = 255 - ch3_initial_len(memory);
@@ -702,18 +664,12 @@ impl APU {
             wave_value = 255;
         }
 
-        // println!("period: {period}");
-
-        // Fill buffer with raw sample rate, when enough samples collected resample to 44100
         let mut sampling_ratio = TARGET_SAMPLE_RATE as f32 / 2097152.0;
         self.ch3.resample_frac += sampling_ratio.fract();
         if self.ch3.resample_frac >= 1.0 {
             self.ch3.resample_frac -= 1.0;
             sampling_ratio += 1.0;
-        // }
-        // let num_rep_samples = sampling_ratio.floor() as u32;
 
-        // for _ in 0..num_rep_samples {
             self.buffer[self.buffer_i] = wave_value;
             self.buffer_i += 1;
             if self.buffer_i == self.buffer.len() {
@@ -731,13 +687,8 @@ impl APU {
                     } else {
                         analog_buffer[2 * i] = 0.0;
                     }
-                    // self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
                 }
                 let outcome = self.out_samples.send(analog_buffer);
-                // match outcome {
-                //     Ok(x) => println!("Send {}", wave_value),
-                //     Err(s) => println!("Send Error: {s}"),
-                // };
             }
         }
     }
