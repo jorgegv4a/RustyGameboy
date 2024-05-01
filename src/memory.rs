@@ -216,6 +216,14 @@ impl AddressSpace {
                     self.standard_io[index as usize - 0xFF00] = value
                     // self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC0) | value & 0x3F
 
+                } else if idx == NR23_ADDR {
+                    // println!("Write to NR23: {value:02X}");
+                    self.standard_io[index as usize - 0xFF00] = value
+
+                } else if idx == NR24_ADDR {
+                    // println!("Write to NR24: {value:02X}");
+                    self.standard_io[index as usize - 0xFF00] = value
+
                 } else if idx == NR13_ADDR || idx == NR14_ADDR {
                     self.standard_io[index as usize - 0xFF00] = value;
                     self.ch1_period_written = true;
