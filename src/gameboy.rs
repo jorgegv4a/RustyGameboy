@@ -84,7 +84,8 @@ impl Gameboy {
     pub fn power_on(&mut self) {
         self.cpu.boot(&mut self.memory);
         loop {
-            let t0 = Instant::now();
+            let start_t = self.cpu.clock;
+            // let t0 = Instant::now();
             if DEBUG {
                 println!("{}", self.cpu);
             }
@@ -107,9 +108,10 @@ impl Gameboy {
 
             let opcode_byte = self.cpu.fetch(&self.memory);
             let (opcode_dict, opcode) = self.cpu.decode(opcode_byte, &self.memory);
-            let nticks = self.cpu.execute(opcode, opcode_dict, &mut self.memory);
+            let remaining_ticks = self.cpu.execute(opcode, opcode_dict, &mut self.memory);
+            let nticks = (self.cpu.clock - start_t) as u8  + remaining_ticks;
             
-            self.cpu.tick(nticks);
+            self.cpu.tick(remaining_ticks);
             self.ppu.tick(nticks, &mut self.memory);
             let quit = self.joypad.tick(nticks, &mut self.memory);
             self.memory.tick(nticks);

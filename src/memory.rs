@@ -37,6 +37,7 @@ pub struct AddressSpace {
     past_tick_tima_enabled: bool,
     clock: u64,
     mapper: Box<dyn Addressable>,
+    ch1_period_written: bool,
 }
 
 impl AddressSpace {
@@ -59,6 +60,7 @@ impl AddressSpace {
             past_tick_tima_enabled: false,
             clock: 0,
             mapper: Box::new(NoCartridge::new(Vec::new())),
+            ch1_period_written: false,
         }
     }
 
@@ -165,31 +167,58 @@ impl AddressSpace {
                     self.internal_div = 0
 
                 } else if idx == NR52_ADDR {
+                    if value & 0x80 == 0 {
+                        // println!("APU DISABLED")
+                    } else if value & 0x80 == 0x80 {
+                        // println!("APU ENABLED")
+                    }
                     self.standard_io[index as usize - 0xFF00] = value & 0x80 | (self.standard_io[index as usize - 0xFF00] & 0xF);
+                    // println!("Write to NR52: {:08b}", self.standard_io[index as usize - 0xFF00])
 
                 } else if idx == NR51_ADDR {
                     self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR51: {value:08b}")
 
                 } else if idx == NR50_ADDR {
                     self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR50: {value:08b}")
 
                 } else if idx == NR30_ADDR {
                     self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR30: {value:08b}")
 
                 } else if idx == NR31_ADDR {
                     self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR31: {value:08b}")
 
                 } else if idx == NR32_ADDR {
                     self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR32: {value:08b}")
 
                 } else if idx == NR34_ADDR {
                     self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR34: {value:08b}")
+
+                } else if idx == NR10_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR10: {value:02X}");
+
+                } else if idx == NR14_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR14: {value:02X}");
 
                 } else if idx == NR11_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC0) | value & 0x3F
+                    self.standard_io[index as usize - 0xFF00] = value;
+                    // println!("Write to NR11: {value:02X}");
+                    // self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC0) | value & 0x3F
 
                 } else if idx == NR21_ADDR {
-                    self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC0) | value & 0x3F
+                    self.standard_io[index as usize - 0xFF00] = value
+                    // self.standard_io[index as usize - 0xFF00] = (self.standard_io[index as usize - 0xFF00] & 0xC0) | value & 0x3F
+
+                } else if idx == NR13_ADDR || idx == NR14_ADDR {
+                    self.standard_io[index as usize - 0xFF00] = value;
+                    self.ch1_period_written = true;
 
                 } else {
                     self.standard_io[index as usize - 0xFF00] = value
@@ -267,6 +296,11 @@ impl AddressSpace {
 
     pub fn apu_write_nr52(&mut self, value: u8) {
         self.standard_io[NR52_ADDR as usize - 0xFF00] = value & 0xF | (self.standard_io[NR52_ADDR as usize - 0xFF00] & 0x80);
+    }
+
+    pub fn apu_write_ch1_period(&mut self, value: u16) {
+        self.standard_io[NR13_ADDR as usize - 0xFF00] = value as u8 & 0xFF;
+        self.standard_io[NR14_ADDR as usize - 0xFF00] = (value >> 8) as u8 & 0x7;
     }
 
     pub fn joypad_write(&mut self, state: u8) {

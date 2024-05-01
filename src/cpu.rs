@@ -67,7 +67,7 @@ pub struct CPU {
     // pub memory: AddressSpace,
     pub master_interrupt_enable: bool,
     pub enable_interrupts_next_instr: bool,
-    clock: u64,
+    pub clock: u64,
     halted: bool,
 }
 
