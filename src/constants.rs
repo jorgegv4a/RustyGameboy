@@ -94,3 +94,8 @@ pub const APU_CH1_PAN_LEFT_BIT: u8 = 4;
 pub const APU_CH2_PAN_LEFT_BIT: u8 = 5;
 pub const APU_CH3_PAN_LEFT_BIT: u8 = 6;
 pub const APU_CH4_PAN_LEFT_BIT: u8 = 7;
+
+pub const AUDIO_BUFFER_NUM_SAMPLES: usize = 512;
+pub const TARGET_SAMPLE_RATE: usize = 44100;
+
+pub const HPF_CAPACITOR_CHARGE: f32 = 0.996;

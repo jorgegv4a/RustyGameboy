@@ -14,10 +14,6 @@ use std::time::Duration;
 use crate::constants::*;
 use crate::memory::AddressSpace;
 
-const AUDIO_BUFFER_NUM_SAMPLES: usize = 512;
-const TARGET_SAMPLE_RATE: usize = 44100;
-const TIME_BETWEEN_BUFFERS: f64 = AUDIO_BUFFER_NUM_SAMPLES as f64 * 1.0 / TARGET_SAMPLE_RATE as f64;
-
 #[derive(PartialEq)]
 enum SweepDirection {
     Inc,
@@ -43,6 +39,7 @@ enum OutputLevel {
     Quarter,
 }
 
+#[derive(PartialEq)]
 enum LFSRWidth {
     Bits15,
     Bits7,
@@ -85,13 +82,14 @@ pub struct Channel {
     sample_index: u8,
     period_step: u16,
     period: u16,
-    resample_frac: f32,
     freq_sweep_i: u8,
     freq_sweep_pace: u8,
     initial_volume: u8,
     shadow_period: u16,
     capacity: f32,
     negative_sweep_calc_executed: bool,
+    lfsr: u16,
+
 }
 
 impl Channel {
@@ -107,13 +105,13 @@ impl Channel {
             sample_index: 0,
             period_step: 1023,
             period: 1024,
-            resample_frac: 0.0,
             freq_sweep_i: 8,
             freq_sweep_pace: 0,
             initial_volume: 0,
             shadow_period: 1023,
             capacity: 0.0,
             negative_sweep_calc_executed: false,
+            lfsr: 0,
         }
     }
 
@@ -121,12 +119,12 @@ impl Channel {
         if value == 255 {
             let v = 0.0;
             let wave_analog = v - self.capacity;
-            self.capacity = v - wave_analog * 0.996;
+            self.capacity = v - wave_analog * HPF_CAPACITOR_CHARGE;
             wave_analog
         } else {
             let v = (value  as f32 / -7.5) + 1.0;
             let wave_analog = v - self.capacity;
-            self.capacity = v - wave_analog * 0.996;
+            self.capacity = v - wave_analog * HPF_CAPACITOR_CHARGE;
             wave_analog
         }
     }
@@ -140,19 +138,18 @@ pub struct APU {
     ch1: Channel,
     ch2: Channel,
     ch3: Channel,
+    ch4: Channel,
     clock: u64,
     out_samples: Sender<[f32; 2*AUDIO_BUFFER_NUM_SAMPLES]>,
     // out_samples: SyncSender<[u8; AUDIO_BUFFER_NUM_SAMPLES]>,
     buffer: [f32; 2 * AUDIO_BUFFER_NUM_SAMPLES],
     buffer_i: usize,
-    debug_file: File,
-    debug_file2: File,
-    debug_file3: File,
-    debug_file4: File,
     frame_sequencer_i: u8,
     start_time: std::time::Instant,
     last_ch1_sample: u8,
     last_ch2_sample: u8,
+    last_ch3_sample: u8,
+    last_ch4_sample: u8,
     resample_frac: f32,
 }
 
@@ -174,30 +171,6 @@ impl APU {
             }
         }).unwrap();
 
-        let filename = std::path::Path::new("CH3_out_pkmred.txt");
-        if filename.exists() {
-            fs::remove_file(filename);
-        }
-        let mut file = OpenOptions::new().create_new(true).write(true).append(true).open(filename).unwrap();
-
-        let filename2 = std::path::Path::new("CH3_out_pkmred_vol.txt");
-        if filename2.exists() {
-            fs::remove_file(filename2);
-        }
-        let mut file2 = OpenOptions::new().create_new(true).write(true).append(true).open(filename2).unwrap();
-
-        let filename3 = std::path::Path::new("CH3_out_pkmred_period.txt");
-        if filename3.exists() {
-            fs::remove_file(filename3);
-        }
-        let mut file3 = OpenOptions::new().create_new(true).write(true).append(true).open(filename3).unwrap();
-
-        let filename4 = std::path::Path::new("CH3_out_pkmred_wave_duty.txt");
-        if filename4.exists() {
-            fs::remove_file(filename4);
-        }
-        let mut file4 = OpenOptions::new().create_new(true).write(true).append(true).open(filename4).unwrap();
-
         APU {
             audio_subsystem,
             div: None,
@@ -206,18 +179,17 @@ impl APU {
             ch1: Channel::new(),
             ch2: Channel::new(),
             ch3: Channel::new(),
+            ch4: Channel::new(),
             clock: 0,
             out_samples: tx,
             buffer: [0f32; 2 * AUDIO_BUFFER_NUM_SAMPLES],
             buffer_i: 0,
-            debug_file: file,
-            debug_file2: file2,
-            debug_file3: file3,
-            debug_file4: file4,
             frame_sequencer_i: 0,
             start_time: std::time::Instant::now(),
             last_ch1_sample: 255,
             last_ch2_sample: 255,
+            last_ch3_sample: 255,
+            last_ch4_sample: 255,
             resample_frac: 0.0,
         }
     }
@@ -232,7 +204,6 @@ impl APU {
         };
         if new_freq >= 2048 {
             self.ch1.on = false;
-            println!("Ch1 off from period sweep (trigger, {} >> {})", self.ch1.shadow_period, ch1_period_sweep_step(memory));
             set_ch1_on(self.ch1.on, memory);
         }
         return new_freq
@@ -267,14 +238,12 @@ impl APU {
 
         if self.ch1.negative_sweep_calc_executed && ch1_sweep_direction(memory) == SweepDirection::Inc {
             self.ch1.on = false;
-            println!("Ch1 off from period sweep direction override");
             set_ch1_on(self.ch1.on, memory);
         }
 
         let new_freq = self.ch1_calc_new_freq(memory);
         if new_freq < 2048 && ch1_period_sweep_step(memory) > 0 {
             if new_freq != self.ch1.period {
-                println!("[{:?}] New period update, {} -> {new_freq}", self.start_time.elapsed().as_secs_f32(), self.ch1.period);
             }
             self.ch1.period = new_freq;
             self.ch1.shadow_period = new_freq;
@@ -299,12 +268,10 @@ impl APU {
 
         if ch1_envelope_direction(memory) == EnvelopeDirection::Dec {
             if self.ch1.volume > 0 {
-                println!("Volume decreased from {}", self.ch1.volume);
                 self.ch1.volume -= 1;
             }
         } else if ch1_envelope_direction(memory) == EnvelopeDirection::Inc {
             if self.ch1.volume < 15 {
-                println!("Volume increased from {}", self.ch1.volume);
                 self.ch1.volume += 1;
             }
         }
@@ -324,13 +291,34 @@ impl APU {
 
         if ch2_envelope_direction(memory) == EnvelopeDirection::Dec {
             if self.ch2.volume > 0 {
-                println!("Volume decreased from {}", self.ch2.volume);
                 self.ch2.volume -= 1;
             }
         } else if ch2_envelope_direction(memory) == EnvelopeDirection::Inc {
             if self.ch2.volume < 15 {
-                println!("Volume increased from {}", self.ch2.volume);
                 self.ch2.volume += 1;
+            }
+        }
+    }
+
+    fn ch4_envelope_tick(&mut self, memory: &AddressSpace) {
+        if self.ch4.env_sweep_pace == 0 {
+            return
+        }
+
+        self.ch4.env_sweep_step -= 1;
+        if self.ch4.env_sweep_step > 0 {
+            return
+        }
+
+        self.ch4.env_sweep_step = self.ch4.env_sweep_pace;
+
+        if ch4_envelope_direction(memory) == EnvelopeDirection::Dec {
+            if self.ch4.volume > 0 {
+                self.ch4.volume -= 1;
+            }
+        } else if ch4_envelope_direction(memory) == EnvelopeDirection::Inc {
+            if self.ch4.volume < 15 {
+                self.ch4.volume += 1;
             }
         }
     }
@@ -340,7 +328,6 @@ impl APU {
             return
         }
         self.ch1.length_i -= 1;
-        println!("Length step: {}", self.ch1.length_i);
         if self.ch1.length_i != 0 {
             return
         }
@@ -350,7 +337,6 @@ impl APU {
 
         self.ch1.on = false;
         set_ch1_on(self.ch1.on, memory);
-        println!("Length expired!");
     }
 
     fn ch2_length_tick(&mut self, memory: &mut AddressSpace) {
@@ -358,7 +344,6 @@ impl APU {
             return
         }
         self.ch2.length_i -= 1;
-        println!("Length step: {}", self.ch2.length_i);
         if self.ch2.length_i != 0 {
             return
         }
@@ -368,7 +353,6 @@ impl APU {
 
         self.ch2.on = false;
         set_ch2_on(self.ch2.on, memory);
-        println!("Length expired!");
     }
 
     fn ch3_length_tick(&mut self, memory: &mut AddressSpace) {
@@ -377,7 +361,6 @@ impl APU {
         }
 
         self.ch3.length_i -= 1;
-        println!("Length step: {}", self.ch3.length_i);
         if self.ch3.length_i != 0 {
             return
         }
@@ -387,7 +370,22 @@ impl APU {
 
         self.ch3.on = false;
         set_ch3_on(self.ch3.on, memory);
-        println!("Length expired!");
+    }
+
+    fn ch4_length_tick(&mut self, memory: &mut AddressSpace) {
+        if !self.ch4.length_enabled {
+            return
+        }
+        self.ch4.length_i -= 1;
+        if self.ch4.length_i != 0 {
+            return
+        }
+
+        self.ch4.length_enabled = false;
+        memory.write(NR44_ADDR, memory.apu_read(NR44_ADDR) & 0x87);
+
+        self.ch4.on = false;
+        set_ch4_on(self.ch4.on, memory);
     }
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {
@@ -395,6 +393,7 @@ impl APU {
             self.ch1_length_tick(memory);
             self.ch2_length_tick(memory);
             self.ch3_length_tick(memory);
+            self.ch4_length_tick(memory);
         } 
         if self.frame_sequencer_i % 4 == 2 {
             self.ch1_period_sweep_tick(memory);
@@ -402,6 +401,7 @@ impl APU {
         if self.frame_sequencer_i % 8 == 7 {
             self.ch1_envelope_tick(memory);
             self.ch2_envelope_tick(memory);
+            self.ch4_envelope_tick(memory);
         }
         self.frame_sequencer_i = (self.frame_sequencer_i + 1) % 8;
     }
@@ -468,6 +468,31 @@ impl APU {
             OutputLevel::Quarter => wave_value >> 2,
             OutputLevel::Mute => 0,
         }
+    }
+
+    pub fn ch4_sample(&self) -> u8 {
+        (self.ch4.lfsr & 1) as u8
+    }
+
+    fn ch4_get_next_sample(&mut self, memory: &AddressSpace) -> u8 {
+        self.ch4.period_step -= 1;
+        if self.ch4.period_step == 0 {
+            let divisor_value = ch4_clock_divider(memory);
+            let divisor = if divisor_value > 0 {
+                divisor_value * 16
+            } else {
+                8
+            };
+            self.ch4.period_step = (divisor as u16) << ch4_clock_shift(memory);
+            let value = ((self.ch4.lfsr & 1) ^ ((self.ch4.lfsr >> 1) & 1)) & 1;
+            // self.ch4.lfsr &= (1 << 15) ^ 0xFFFF;
+            self.ch4.lfsr = ((value ^ 1) << 14) | (self.ch4.lfsr >> 1);
+            if ch4_lfsr_width(memory) == LFSRWidth::Bits7 {
+                self.ch4.lfsr &= (1 << 6) ^ 0xFFFF;
+                self.ch4.lfsr |= (value ^ 1) << 6;
+            }
+        }
+        self.ch4_sample()
     }
 
     pub fn ch1_tick(&mut self, memory: &mut AddressSpace) -> u8 {
@@ -595,15 +620,47 @@ impl APU {
         }
     }
 
+    pub fn ch4_tick(&mut self, memory: &mut AddressSpace) -> u8 {
+        if ch4_dac_on(memory) {
+            if ch4_trigger(memory) {
+                self.ch4.lfsr = 0;
+                self.ch4.on = true;
+                // Envelope sweep registers
+                self.ch4.initial_volume = ch4_initial_volume(memory);
+                self.ch4.env_sweep_pace = ch4_envelope_sweep_pace(memory);
+                self.ch4.env_sweep_step = self.ch4.env_sweep_pace;
+                self.ch4.volume = self.ch4.initial_volume;
+
+                if self.ch4.length_i == 0 {
+                    self.ch4.length_i = 64;
+                }
+            }
+        } else {
+            self.ch4.on = false;
+        }
+        set_ch4_on(self.ch4.on, memory);
+
+        let length_timer_value = ch4_initial_len(memory);
+
+        if self.ch4.on {
+            if !self.ch4.length_enabled && ch4_length_enable(memory) {
+                self.ch4.length_i = 64 - length_timer_value;
+                self.ch4.length_enabled = ch4_length_enable(memory);
+            } else if length_timer_value > 0 {
+                self.ch4.length_i = 64 - length_timer_value;
+            }
+            self.ch4_get_next_sample(memory) * self.ch4.volume
+        } else {
+            255
+        }
+    }
+
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
-        // println!("Ticking APU with {nticks} ticks");
         let device_status = self.device.status();
         if !apu_enabled(memory) {
             if device_status == AudioStatus::Playing {
                 // Pause playback
                 self.device.pause();
-                println!("APU DISABLED");
-                // println!("Playback paused");
             }
             return;
         } else {
@@ -611,78 +668,85 @@ impl APU {
                 // Start playback
                 self.device.resume();
                 self.frame_sequencer_i = 0;
-                println!("APU ENABLED");
-                // println!("Playback enabled");
             }
         }
         for i in 0..nticks {
-            // let div = (memory.read(DIV_ADDR) >> 4) & 1;
             let div = (self.clock >> (4 + 8)) & 1;
             if div == 0 && self.div.unwrap_or(0) == 1 {
                 self.div_apu += 1; // ticks at 512 Hz
                 self.single_tick(memory);
             }
 
-            // if self.clock % 2 == 0 {
-            //     self.ch3_tick(memory);
-            // }
+            let ch4_sample = self.ch4_tick(memory);
+            self.last_ch4_sample = ch4_sample;
+
+            if self.clock % 4 == 0 {
+                let ch1_sample = self.ch1_tick(memory);
+                let ch2_sample = self.ch2_tick(memory);
+                self.last_ch1_sample = ch1_sample;
+                self.last_ch2_sample = ch2_sample;
+            }
+
             if self.clock % 2 == 0 {
-                if self.clock % 4 == 0 {
-                    let ch1_sample = self.ch1_tick(memory);
-                    let ch2_sample = self.ch2_tick(memory);
-                    self.last_ch1_sample = ch1_sample;
-                    self.last_ch2_sample = ch2_sample;
-                }
                 let ch3_sample = self.ch3_tick(memory);
+                self.last_ch3_sample = ch3_sample;
+            }
 
-                let sampling_ratio = TARGET_SAMPLE_RATE as f32 / (2097152.0);
-                self.resample_frac += sampling_ratio.fract();
+            self.resample_frac += (TARGET_SAMPLE_RATE as f32 / 4194304.0).fract();
 
-                if self.resample_frac >= 1.0 {
-                    self.resample_frac -= 1.0;
-                    let ch1_analog = self.ch1.buffer_to_analog(self.last_ch1_sample);
-                    let ch2_analog = self.ch2.buffer_to_analog(self.last_ch2_sample);
-                    let ch3_analog = self.ch3.buffer_to_analog(ch3_sample);
+            if self.resample_frac >= 1.0 {
+                self.resample_frac -= 1.0;
+                let ch1_analog = self.ch1.buffer_to_analog(self.last_ch1_sample);
+                let ch2_analog = self.ch2.buffer_to_analog(self.last_ch2_sample);
+                let ch3_analog = self.ch3.buffer_to_analog(self.last_ch3_sample);
+                let ch4_analog = self.ch4.buffer_to_analog(self.last_ch4_sample);
 
-                    let mut left_analog: f32 = 0.0;
-                    let mut right_analog: f32 = 0.0;
+                let mut left_analog: f32 = 0.0;
+                let mut right_analog: f32 = 0.0;
 
 
-                    if ch1_pan_right(memory) {
-                        right_analog += ch1_analog;
-                    }
-                    if ch1_pan_left(memory) {
-                        left_analog += ch1_analog;
-                    }
+                if ch1_pan_right(memory) {
+                    right_analog += ch1_analog;
+                }
+                if ch1_pan_left(memory) {
+                    left_analog += ch1_analog;
+                }
 
-                    if ch2_pan_right(memory) {
-                        right_analog += ch2_analog;
-                    }
-                    if ch2_pan_left(memory) {
-                        left_analog += ch2_analog;
-                    }
+                if ch2_pan_right(memory) {
+                    right_analog += ch2_analog;
+                }
+                if ch2_pan_left(memory) {
+                    left_analog += ch2_analog;
+                }
 
-                    if ch3_pan_right(memory) {
-                        right_analog += ch3_analog;
-                    }
-                    if ch3_pan_left(memory) {
-                        left_analog += ch3_analog;
-                    }
+                if ch3_pan_right(memory) {
+                    right_analog += ch3_analog;
+                }
+                if ch3_pan_left(memory) {
+                    left_analog += ch3_analog;
+                }
 
-                    left_analog = (left_analog / 3.0) * ((master_left_volume(memory) + 1) as f32 / 8.0);
-                    right_analog = (right_analog / 3.0) * ((master_right_volume(memory) + 1) as f32 / 8.0);
-                    self.buffer[2 * self.buffer_i] = left_analog;
-                    self.buffer[2 * self.buffer_i + 1] = right_analog;
+                if ch4_pan_right(memory) {
+                    right_analog += ch4_analog;
+                }
+                if ch4_pan_left(memory) {
+                    left_analog += ch4_analog;
+                }
 
-                    self.debug_file.write_all(&self.buffer[2 * self.buffer_i].to_be_bytes());
+                left_analog = (left_analog / 4.0) * ((master_left_volume(memory) + 1) as f32 / 8.0);
+                right_analog = (right_analog / 4.0) * ((master_right_volume(memory) + 1) as f32 / 8.0);
+                self.buffer[2 * self.buffer_i] = left_analog;
+                self.buffer[2 * self.buffer_i + 1] = right_analog;
 
-                    self.buffer_i += 1;
-                    if self.buffer_i == AUDIO_BUFFER_NUM_SAMPLES {
-                        self.buffer_i = 0;
-                        let outcome = self.out_samples.send(self.buffer.clone());
-                    }
+                // self.debug_file.write_all(&self.buffer[2 * self.buffer_i].to_be_bytes());
+
+                self.buffer_i += 1;
+                if self.buffer_i == AUDIO_BUFFER_NUM_SAMPLES {
+                    self.buffer_i = 0;
+                    let outcome = self.out_samples.send(self.buffer.clone());
                 }
             }
+
             // TODO: continue mixing samples
             self.clock += 1;
             self.div = Some((div & 1) as u8);
@@ -799,7 +863,7 @@ pub fn ch1_period_sweep_pace(memory: &AddressSpace) -> u8 {
     return (memory.read(NR10_ADDR) >> 4) & 7;
 }
 
-pub fn ch1_sweep_direction(memory: &AddressSpace) -> SweepDirection {
+fn ch1_sweep_direction(memory: &AddressSpace) -> SweepDirection {
     if (memory.read(NR10_ADDR) >> 3) & 1 == 1 {
         SweepDirection::Dec
     } else {
@@ -811,7 +875,7 @@ pub fn ch1_period_sweep_step(memory: &AddressSpace) -> u8 {
     return memory.read(NR10_ADDR) & 7;
 }
 
-pub fn ch1_wave_duty(memory: &AddressSpace) -> WaveDuty {
+fn ch1_wave_duty(memory: &AddressSpace) -> WaveDuty {
     match (memory.apu_read(NR11_ADDR) >> 6) & 3 {
         0 => WaveDuty::Eight,
         1 => WaveDuty::Quarter,
@@ -831,7 +895,7 @@ pub fn ch1_initial_volume(memory: &AddressSpace) -> u8 {
     return (memory.read(NR12_ADDR) >> 4) & 0xF;
 }
 
-pub fn ch1_envelope_direction(memory: &AddressSpace) -> EnvelopeDirection {
+fn ch1_envelope_direction(memory: &AddressSpace) -> EnvelopeDirection {
     if (memory.read(NR12_ADDR) >> 3) & 1 == 0 {
         EnvelopeDirection::Dec
     } else {
@@ -874,7 +938,7 @@ pub fn ch1_trigger(memory: &mut AddressSpace) -> bool {
 
 ///
 /// 
-pub fn ch2_wave_duty(memory: &AddressSpace) -> WaveDuty {
+fn ch2_wave_duty(memory: &AddressSpace) -> WaveDuty {
     match (memory.apu_read(NR21_ADDR) >> 6) & 3 {
         0 => WaveDuty::Eight,
         1 => WaveDuty::Quarter,
@@ -894,7 +958,7 @@ pub fn ch2_initial_volume(memory: &AddressSpace) -> u8 {
     return (memory.read(NR22_ADDR) >> 4) & 0xF;
 }
 
-pub fn ch2_envelope_direction(memory: &AddressSpace) -> EnvelopeDirection {
+fn ch2_envelope_direction(memory: &AddressSpace) -> EnvelopeDirection {
     if (memory.read(NR22_ADDR) >> 3) & 1 == 0 {
         EnvelopeDirection::Dec
     } else {
@@ -963,8 +1027,13 @@ pub fn ch3_length_enable(memory: &AddressSpace) -> bool {
     return (memory.read(NR34_ADDR) >> 6) & 1 == 1;
 }
 
-pub fn ch3_trigger(memory: &AddressSpace) -> bool {
-    return (memory.apu_read(NR34_ADDR) >> 7) & 1 == 1;
+pub fn ch3_trigger(memory: &mut AddressSpace) -> bool {
+    let reg_value = memory.apu_read(NR34_ADDR);
+    let state = (reg_value >> 7) & 1 == 1;
+    if state {
+        memory.write(NR34_ADDR, reg_value & 0x4F)   
+    };
+    state
 }
 
 pub fn ch3_wave_sample(index: u8, memory: &AddressSpace) -> u8 {
@@ -987,7 +1056,7 @@ pub fn ch4_initial_volume(memory: &AddressSpace) -> u8 {
     return (memory.read(NR42_ADDR) >> 4) & 0xF;
 }
 
-pub fn ch4_envelope_direction(memory: &AddressSpace) -> EnvelopeDirection {
+fn ch4_envelope_direction(memory: &AddressSpace) -> EnvelopeDirection {
     if (memory.read(NR42_ADDR) >> 3) & 1 == 0 {
         EnvelopeDirection::Dec
     } else {
@@ -1007,7 +1076,7 @@ pub fn ch4_clock_divider(memory: &AddressSpace) -> u8 {
     return memory.read(NR43_ADDR) & 0x7;
 }
 
-pub fn ch4_lfsr_width(memory: &AddressSpace) -> LFSRWidth {
+fn ch4_lfsr_width(memory: &AddressSpace) -> LFSRWidth {
     if (memory.read(NR43_ADDR) >> 3) & 0x1 == 1 {
         LFSRWidth::Bits7
     } else {
@@ -1023,6 +1092,11 @@ pub fn ch4_length_enable(memory: &AddressSpace) -> bool {
     return (memory.read(NR44_ADDR) >> 6) & 1 == 1;
 }
 
-pub fn ch4_trigger(memory: &AddressSpace) -> bool {
-    return (memory.apu_read(NR44_ADDR) >> 7) & 1 == 1;
+pub fn ch4_trigger(memory: &mut AddressSpace) -> bool {
+    let reg_value = memory.apu_read(NR44_ADDR);
+    let state = (reg_value >> 7) & 1 == 1;
+    if state {
+        memory.write(NR44_ADDR, reg_value & 0x4F)   
+    };
+    state
 }
