@@ -153,6 +153,7 @@ pub struct APU {
     start_time: std::time::Instant,
     last_ch1_sample: u8,
     last_ch2_sample: u8,
+    resample_frac: f32,
 }
 
 
@@ -217,6 +218,7 @@ impl APU {
             start_time: std::time::Instant::now(),
             last_ch1_sample: 255,
             last_ch2_sample: 255,
+            resample_frac: 0.0,
         }
     }
 
@@ -468,19 +470,22 @@ impl APU {
         }
     }
 
-    pub fn ch1_tick(&mut self, memory: &mut AddressSpace) -> Option<u8> {
+    pub fn ch1_tick(&mut self, memory: &mut AddressSpace) -> u8 {
         if self.ch1.negative_sweep_calc_executed && ch1_sweep_direction(memory) == SweepDirection::Inc {
             self.ch1.on = false;
             set_ch1_on(self.ch1.on, memory);
         }
         if ch1_dac_on(memory) {
-            if ch1_trigger(memory) {        
+            if ch1_trigger(memory) {
+                self.ch1.on = true;
+                // Period registers
                 let period_low = ch1_initial_period_low(memory);
                 let period_high = ch1_initial_period_high(memory);
                 self.ch1.period = ((period_high as u16) << 8) + period_low as u16;
                 self.ch1.shadow_period = self.ch1.period;
                 self.ch1.period_step = self.ch1.period;
 
+                // Freq Sweep registers
                 self.ch1.freq_sweep_pace = ch1_period_sweep_pace(memory);
                 let period_sweep_shift = ch1_period_sweep_step(memory);
                 self.ch1.freq_sweep_enabled = self.ch1.freq_sweep_pace > 0 || period_sweep_shift > 0;
@@ -489,9 +494,11 @@ impl APU {
                 }
                 self.ch1.freq_sweep_i = self.ch1.freq_sweep_pace;
                 self.ch1.negative_sweep_calc_executed = false;
+                if self.ch1.freq_sweep_enabled && period_sweep_shift > 0 {
+                    self.ch1_calc_new_freq(memory);
+                }
 
-                println!("Ch1 trigger!");
-                self.ch1.on = true;
+                // Envelope sweep registers
                 self.ch1.initial_volume = ch1_initial_volume(memory);
                 self.ch1.env_sweep_pace = ch1_envelope_sweep_pace(memory);
                 self.ch1.env_sweep_step = self.ch1.env_sweep_pace;
@@ -500,86 +507,38 @@ impl APU {
                 if self.ch1.length_i == 0 {
                     self.ch1.length_i = 64;
                 }
-
-                if self.ch1.freq_sweep_enabled && period_sweep_shift > 0 {
-                    self.ch1_calc_new_freq(memory);
-                }
             }
         } else {
             self.ch1.on = false;
-            println!("Ch1 DAC set to off");
         }
         set_ch1_on(self.ch1.on, memory);
-
-        let wave_value;
 
         let length_timer_value = ch1_initial_len(memory);
 
         if self.ch1.on {
             if !self.ch1.length_enabled && ch1_length_enable(memory) {
                 self.ch1.length_i = 64 - length_timer_value;
-                println!("!!!!!!!!!!!!!!!!!!!!!!!Length enabled!");
                 self.ch1.length_enabled = ch1_length_enable(memory);
             } else if length_timer_value > 0 {
                 self.ch1.length_i = 64 - length_timer_value;
             }
-
-            wave_value = self.ch1_get_next_sample(memory);
+            self.ch1_get_next_sample(memory) * self.ch1.volume
         } else {
-            wave_value = 255;
-        }
-
-        // Fill buffer with raw sample rate, when enough samples collected resample to 44100
-        let sampling_ratio = TARGET_SAMPLE_RATE as f32 / 1048576.0;
-        self.ch1.resample_frac += sampling_ratio.fract();
-        if self.ch1.resample_frac >= 1.0 {
-            self.ch1.resample_frac -= 1.0;
-            println!("[{:?}] Generating 1 sample of period {} (value {wave_value}, vol: {})", self.start_time.elapsed().as_secs_f32(), self.ch1.period, self.ch1.volume);
-            // if wave_value == 255 {
-            //     self.buffer[self.buffer_i] = wave_value;
-            // } else {
-            //     self.buffer[self.buffer_i] = wave_value * self.ch1.volume;
-            // }
-            // self.buffer_i += 1;
-            // if self.buffer_i == self.buffer.len() {
-            //     self.buffer_i = 0;
-            //     let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
-            //     for (i, x) in self.buffer.iter().enumerate() {
-            //         let wave_analog = self.ch1.buffer_to_analog(*x);
-            //         if ch1_pan_right(memory) {
-            //             analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
-            //         } else {
-            //             analog_buffer[2 * i + 1] = 0.0;
-            //         }
-            //         if ch1_pan_left(memory) {
-            //             analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
-            //         } else {
-            //             analog_buffer[2 * i] = 0.0;
-            //         }
-            //         self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
-            //     }
-            //     let outcome = self.out_samples.send(analog_buffer);
-            // }
-            if wave_value == 255 {
-                Some(wave_value)
-            } else {
-                Some(wave_value * self.ch1.volume)
-            }
-        } else {
-            None
+            255
         }
     }
 
-    pub fn ch2_tick(&mut self, memory: &mut AddressSpace) -> Option<u8> {
+    pub fn ch2_tick(&mut self, memory: &mut AddressSpace) -> u8 {
         if ch2_dac_on(memory) {
-            if ch2_trigger(memory) {        
+            if ch2_trigger(memory) {     
+                self.ch2.on = true;
+                // Period registers   
                 let period_low = ch2_initial_period_low(memory);
                 let period_high = ch2_initial_period_high(memory);
                 self.ch2.period = ((period_high as u16) << 8) + period_low as u16;
                 self.ch2.period_step = self.ch2.period;
 
-                println!("Ch2 trigger!");
-                self.ch2.on = true;
+                // Envelope sweep registers
                 self.ch2.initial_volume = ch2_initial_volume(memory);
                 self.ch2.env_sweep_pace = ch2_envelope_sweep_pace(memory);
                 self.ch2.env_sweep_step = self.ch2.env_sweep_pace;
@@ -591,121 +550,49 @@ impl APU {
             }
         } else {
             self.ch2.on = false;
-            println!("Ch2 DAC set to off");
         }
         set_ch2_on(self.ch2.on, memory);
-
-        let wave_value;
 
         let length_timer_value = ch2_initial_len(memory);
 
         if self.ch2.on {
             if !self.ch2.length_enabled && ch2_length_enable(memory) {
                 self.ch2.length_i = 64 - length_timer_value;
-                println!("!!!!!!!!!!!!!!!!!!!!!!!Length enabled!");
                 self.ch2.length_enabled = ch2_length_enable(memory);
             } else if length_timer_value > 0 {
                 self.ch2.length_i = 64 - length_timer_value;
             }
-
-            wave_value = self.ch2_get_next_sample(memory);
+            self.ch2_get_next_sample(memory) * self.ch2.volume
         } else {
-            wave_value = 255;
-        }
-
-        // Fill buffer with raw sample rate, when enough samples collected resample to 44100
-        let sampling_ratio = TARGET_SAMPLE_RATE as f32 / 1048576.0;
-        self.ch2.resample_frac += sampling_ratio.fract();
-        if self.ch2.resample_frac >= 1.0 {
-            self.ch2.resample_frac -= 1.0;
-            println!("[{:?}] Generating 1 sample of period {} (value {wave_value}, vol: {})", self.start_time.elapsed().as_secs_f32(), self.ch2.period, self.ch2.volume);
-
-            // if wave_value == 255 {
-            //     self.buffer[self.buffer_i] = wave_value;
-            // } else {
-            //     self.buffer[self.buffer_i] = wave_value * self.ch2.volume;
-            // }
-            // self.buffer_i += 1;
-            // if self.buffer_i == self.buffer.len() {
-            //     self.buffer_i = 0;
-            //     let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
-            //     for (i, x) in self.buffer.iter().enumerate() {
-            //         let wave_analog = self.ch2.buffer_to_analog(*x);
-            //         if ch2_pan_right(memory) {
-            //             analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
-            //         } else {
-            //             analog_buffer[2 * i + 1] = 0.0;
-            //         }
-            //         if ch2_pan_left(memory) {
-            //             analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
-            //         } else {
-            //             analog_buffer[2 * i] = 0.0;
-            //         }
-            //         self.debug_file.write_all(&analog_buffer[2* i].to_be_bytes());
-            //     }
-            //     let outcome = self.out_samples.send(analog_buffer);
-            // }
-            if wave_value == 255 {
-                Some(wave_value)
-            } else {
-                Some(wave_value * self.ch2.volume)
-            }
-        } else {
-            None
+            255
         }
     }
 
 
-    pub fn ch3_tick(&mut self, memory: &mut AddressSpace) {
+    pub fn ch3_tick(&mut self, memory: &mut AddressSpace) -> u8 {
         if ch3_dac_on(memory) {
-            if !self.ch3.on && ch3_trigger(memory) {
+            if ch3_trigger(memory) {
                 self.ch3.on = true;
+                // Period registers
+                let period_low = ch3_initial_period_low(memory);
+                let period_high = ch3_initial_period_high(memory);
+                self.ch3.period = ((period_high as u16) << 8) + period_low as u16;
             }
         } else {
             self.ch3.on = false;
         }
         set_ch3_on(self.ch3.on, memory);
 
-        let wave_value;
-
         if self.ch3.on {
             if ch3_length_enable(memory) && !self.ch3.length_enabled {
                 self.ch3.length_enabled = true;
                 self.ch3.length_i = 255 - ch3_initial_len(memory);
-                println!("Length enabled!");
             }
             
-            wave_value = self.ch3_get_next_sample(memory);
+            self.ch3_get_next_sample(memory)
         } else {
-            wave_value = 255;
+            255
         }
-
-        let sampling_ratio = TARGET_SAMPLE_RATE as f32 / 2097152.0;
-        self.ch3.resample_frac += sampling_ratio.fract();
-        // if self.ch3.resample_frac >= 1.0 {
-        //     self.ch3.resample_frac -= 1.0;
-
-        //     self.buffer[self.buffer_i] = wave_value;
-        //     self.buffer_i += 1;
-        //     if self.buffer_i == self.buffer.len() {
-        //         self.buffer_i = 0;
-        //         let mut analog_buffer = [0f32; 2*AUDIO_BUFFER_NUM_SAMPLES];
-        //         for (i, x) in self.buffer.iter().enumerate() {
-        //             let wave_analog = self.ch3.buffer_to_analog(*x);
-        //             if ch3_pan_right(memory) {
-        //                 analog_buffer[2 * i + 1] = wave_analog * ((master_right_volume(memory) + 1) as f32 / 8.0);
-        //             } else {
-        //                 analog_buffer[2 * i + 1] = 0.0;
-        //             }
-        //             if ch3_pan_left(memory) {
-        //                 analog_buffer[2* i] = wave_analog * ((master_left_volume(memory) + 1) as f32 / 8.0);
-        //             } else {
-        //                 analog_buffer[2 * i] = 0.0;
-        //             }
-        //         }
-        //         let outcome = self.out_samples.send(analog_buffer);
-        //     }
-        // }
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
@@ -739,16 +626,23 @@ impl APU {
             // if self.clock % 2 == 0 {
             //     self.ch3_tick(memory);
             // }
-            if self.clock % 4 == 0 {
-                let ch1_sample = self.ch1_tick(memory);
-                let ch2_sample = self.ch2_tick(memory);
+            if self.clock % 2 == 0 {
+                if self.clock % 4 == 0 {
+                    let ch1_sample = self.ch1_tick(memory);
+                    let ch2_sample = self.ch2_tick(memory);
+                    self.last_ch1_sample = ch1_sample;
+                    self.last_ch2_sample = ch2_sample;
+                }
+                let ch3_sample = self.ch3_tick(memory);
 
-                if ch1_sample.is_some() {
-                    self.last_ch1_sample = ch1_sample.unwrap();
-                    self.last_ch2_sample = ch2_sample.unwrap();
+                let sampling_ratio = TARGET_SAMPLE_RATE as f32 / (2097152.0);
+                self.resample_frac += sampling_ratio.fract();
 
-                    let ch1_analog = self.ch1.buffer_to_analog(ch1_sample.unwrap());
-                    let ch2_analog = self.ch2.buffer_to_analog(ch2_sample.unwrap());
+                if self.resample_frac >= 1.0 {
+                    self.resample_frac -= 1.0;
+                    let ch1_analog = self.ch1.buffer_to_analog(self.last_ch1_sample);
+                    let ch2_analog = self.ch2.buffer_to_analog(self.last_ch2_sample);
+                    let ch3_analog = self.ch3.buffer_to_analog(ch3_sample);
 
                     let mut left_analog: f32 = 0.0;
                     let mut right_analog: f32 = 0.0;
@@ -768,8 +662,15 @@ impl APU {
                         left_analog += ch2_analog;
                     }
 
-                    left_analog = (left_analog / 2.0) * ((master_left_volume(memory) + 1) as f32 / 8.0);
-                    right_analog = (right_analog / 2.0) * ((master_right_volume(memory) + 1) as f32 / 8.0);
+                    if ch3_pan_right(memory) {
+                        right_analog += ch3_analog;
+                    }
+                    if ch3_pan_left(memory) {
+                        left_analog += ch3_analog;
+                    }
+
+                    left_analog = (left_analog / 3.0) * ((master_left_volume(memory) + 1) as f32 / 8.0);
+                    right_analog = (right_analog / 3.0) * ((master_right_volume(memory) + 1) as f32 / 8.0);
                     self.buffer[2 * self.buffer_i] = left_analog;
                     self.buffer[2 * self.buffer_i + 1] = right_analog;
 
@@ -1040,7 +941,7 @@ pub fn ch3_initial_len(memory: &AddressSpace) -> u8 {
     return memory.apu_read(NR31_ADDR);
 }
 
-pub fn ch3_output_level(memory: &AddressSpace) -> OutputLevel {
+fn ch3_output_level(memory: &AddressSpace) -> OutputLevel {
     match (memory.read(NR32_ADDR) >> 5) & 0x3 {
         0 => OutputLevel::Mute,
         1 => OutputLevel::Full,
