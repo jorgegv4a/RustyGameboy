@@ -1,6 +1,8 @@
 extern crate sdl2;
 
-use sdl2::pixels::Color;
+use sdl2::pixels::{Color, PixelFormatEnum};
+use sdl2::render::TextureCreator;
+use sdl2::video::WindowContext;
 use sdl2::VideoSubsystem;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -83,12 +85,14 @@ pub struct PPU {
     mode: PPUMode,
     tick_i: u64,
     canvas: sdl2::render::Canvas<sdl2::video::Window>,
+    texture_creator: TextureCreator<WindowContext>,
     render_window_on_cur_frame: bool,
     wly: usize,
     stat_flag: bool,
     past_cycle_disabled: bool,
     frame_start_t: Instant,
     past_tick_lyc: Option<u8>,
+    img: [u8; SCREEN_HEIGHT * SCREEN_WIDTH],
 }
 
 impl PPU {
@@ -101,6 +105,7 @@ impl PPU {
             .map_err(|e| e.to_string()).unwrap();
         let mut canvas = window.into_canvas().build().map_err(|e| e.to_string()).unwrap();
         canvas.set_scale(window_scale, window_scale);
+        let texture_creator = canvas.texture_creator();
         PPU {
             dot: 0,
             ly: 0,
@@ -111,9 +116,11 @@ impl PPU {
             render_window_on_cur_frame: false,
             wly: 0,
             past_cycle_disabled: false,
+            texture_creator,
             frame_start_t: Instant::now(),
             stat_flag: false,
             past_tick_lyc: None,
+            img: [0; SCREEN_HEIGHT * SCREEN_WIDTH],
         }
     }
 
@@ -191,7 +198,7 @@ impl PPU {
                         }
                         let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
                         let fps = 1.0 / frame_time_seconds;
-                        println!("FPS: {fps:.1}, raw frame time: {:.3} ms ({} FPS)", raw_frame_time_seconds * 1000.0, 1.0 / raw_frame_time_seconds);
+                        println!("FPS: {fps:.1}, raw frame time: {:.3} ms ({:.1} FPS)", raw_frame_time_seconds * 1000.0, 1.0 / raw_frame_time_seconds);
                         self.frame_start_t = Instant::now();
                     }
                 }
@@ -239,6 +246,31 @@ impl PPU {
                         self.mode = PPUMode::VBlank;
                         memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
+
+                        let mut texture = self.texture_creator.create_texture_streaming(PixelFormatEnum::RGB24, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32).map_err(|e| e.to_string()).unwrap();
+                        texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
+                            for y in 0..SCREEN_HEIGHT {
+                                for x in 0..SCREEN_WIDTH {
+                                    let offset = y * pitch + x * 3;
+                                    let value = self.img[y * SCREEN_HEIGHT + x];
+                                    buffer[offset] = value;
+                                    buffer[offset + 1] = value;
+                                    buffer[offset + 2] = value;
+                                }
+                            }
+                        }).unwrap();
+                        
+                        self.canvas.clear();
+                        self.canvas.copy(&texture, None, Some(sdl2::rect::Rect::new(0, 0, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32))).unwrap();
+                        // self.canvas.copy_ex(
+                        //     &texture,
+                        //     None,
+                        //     Some(sdl2::rect::Rect::new(0, 0, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)),
+                        //     0.0,
+                        //     None,
+                        //     false,
+                        //     false,
+                        // ).unwrap();
                         self.canvas.present();
                     } else { 
                         if self.render_window_on_cur_frame && wx(memory) <= 166 {
@@ -339,15 +371,25 @@ impl PPU {
             let tile_low_byte = memory.read(tile_start_i + 2 * j);
             let tile_high_byte = memory.read((tile_start_i + 2 * j) + 1);
             for i in 0..8 {
-                let low_byte = (tile_low_byte >> i) & 1;
-                let high_byte = ((tile_high_byte >> i) & 1) << 1;
-                let color_id = min(3, max(0, high_byte | low_byte));
+                let low_bit = (tile_low_byte >> i) & 1;
+                let high_bit = ((tile_high_byte >> i) & 1) << 1;
+                let color_id = min(3, max(0, high_bit | low_bit));
                 // let color = (((color_id as f32) / 3f32) * 255f32) as u8;
                 // tile[j as usize][(7 - i) as usize] = color;
                 tile[j as usize][(7 - i) as usize] = color_id;
             }
         };
         tile
+    }
+
+    fn get_tile_xy(&self, memory: &AddressSpace, tile_start_i: u16, y: usize, x: usize) -> u8 {
+        let tile_low_byte = memory.read(tile_start_i + 2 * y as u16);
+        let tile_high_byte = memory.read((tile_start_i + 2 * y as u16) + 1);
+        let i = 7 - x;
+        let low_byte = (tile_low_byte >> i) & 1;
+        let high_byte = ((tile_high_byte >> i) & 1) << 1;
+        let color_id = min(3, max(0, high_byte | low_byte));
+        color_id
     }
 
     fn get_double_tile(&self, memory: &AddressSpace, tile_start_i: u16) -> [[u8; 8]; 16] {
@@ -422,8 +464,9 @@ impl PPU {
                         0x9000 + tile_offset * 16
                     }  
                 };
-                let tile = self.get_tile(memory, tile_idx);
-                bg_color = tile[tile_offset_y][tile_offset_x];
+                // let tile = self.get_tile(memory, tile_idx);
+                // bg_color = tile[tile_offset_y][tile_offset_x];
+                bg_color = self.get_tile_xy(memory, tile_idx, tile_offset_y, tile_offset_x);
             } else {
                 let src_row;
                 if line_j < fit_y {
@@ -454,8 +497,9 @@ impl PPU {
                         0x9000 + tile_offset * 16
                     }
                 };
-                let tile = self.get_tile(memory, tile_idx);
-                bg_color = tile[tile_offset_y][tile_offset_x];
+                // let tile = self.get_tile(memory, tile_idx);
+                // bg_color = tile[tile_offset_y][tile_offset_x];
+                bg_color = self.get_tile_xy(memory, tile_idx, tile_offset_y, tile_offset_x);
             }
 
             let mut sprite_pixel: Option<(u8, ColorPalette, bool)> = None;
@@ -538,8 +582,10 @@ impl PPU {
                 (ColorPalette::OBP1, _) => obp1_palette[color as usize].into(),
             };
             
-            self.canvas.set_draw_color(color_value);
-            self.canvas.draw_point(Point::new(i as i32, line_j as i32)).unwrap();
+            // self.canvas.set_draw_color(color_value);
+            // self.canvas.draw_point(Point::new(i as i32, line_j as i32)).unwrap();
+            let idx = line_j * SCREEN_HEIGHT + i;
+            self.img[idx] = color_value.r;
         }
     }
 }
