@@ -184,14 +184,14 @@ impl PPU {
                 if self.dot == 0 {
                     memory.ppu_write_LY_update_STAT(self.ly);
                     if self.ly == 0 {
-                        let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
-                        let time_to_wait = 1.0/59.7 - frame_time_seconds - 0.00006;
+                        let raw_frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
+                        let time_to_wait = 1.0/59.7 - raw_frame_time_seconds - 0.00006;
                         if time_to_wait > 0.0 {
                             std::thread::sleep(Duration::from_secs_f64(time_to_wait));
                         }
                         let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
                         let fps = 1.0 / frame_time_seconds;
-                        println!("Frame time: {:.3} ms, FPS: {fps:.1}", frame_time_seconds * 1000.0);
+                        println!("FPS: {fps:.1}, raw frame time: {:.3} ms ({} FPS)", raw_frame_time_seconds * 1000.0, 1.0 / raw_frame_time_seconds);
                         self.frame_start_t = Instant::now();
                     }
                 }
@@ -239,6 +239,7 @@ impl PPU {
                         self.mode = PPUMode::VBlank;
                         memory.unlock_oam();
                         memory.request_interrupt(Interrupt::VBlank);
+                        self.canvas.present();
                     } else { 
                         if self.render_window_on_cur_frame && wx(memory) <= 166 {
                             self.wly += 1;
@@ -540,8 +541,6 @@ impl PPU {
             self.canvas.set_draw_color(color_value);
             self.canvas.draw_point(Point::new(i as i32, line_j as i32)).unwrap();
         }
-
-        self.canvas.present();
     }
 }
 
