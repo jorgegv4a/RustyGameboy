@@ -252,7 +252,7 @@ impl PPU {
                             for y in 0..SCREEN_HEIGHT {
                                 for x in 0..SCREEN_WIDTH {
                                     let offset = y * pitch + x * 3;
-                                    let value = self.img[y * SCREEN_HEIGHT + x];
+                                    let value = self.img[y * SCREEN_WIDTH + x];
                                     buffer[offset] = value;
                                     buffer[offset + 1] = value;
                                     buffer[offset + 2] = value;
@@ -584,7 +584,7 @@ impl PPU {
             
             // self.canvas.set_draw_color(color_value);
             // self.canvas.draw_point(Point::new(i as i32, line_j as i32)).unwrap();
-            let idx = line_j * SCREEN_HEIGHT + i;
+            let idx = line_j * SCREEN_WIDTH + i;
             self.img[idx] = color_value.r;
         }
     }
