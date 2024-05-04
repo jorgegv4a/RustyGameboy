@@ -6,7 +6,7 @@ A wip gameboy emulator as a way to get into Rust. Runs Pokemon Red at 60+ fps.
 - Passes dmg-acid2
 - Working MBC1 and MBC3
 - Audio
+- Game saving
 
 # TODO
 - Implement the remaining mappers
-- Implement battery buffered ram for saves
