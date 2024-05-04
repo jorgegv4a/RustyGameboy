@@ -126,21 +126,171 @@ impl PPU {
 
     fn check_stat_irq(&self, memory: &AddressSpace) -> bool {
         let value = memory.read(STAT_ADDR);
-        let interrupt_on_equal_lyc = (value >> 6) & 1 == 1;
+        let interrupt_on_equal_lyc = (value >> 6) & 1 != 0;
 
-        if (value >> 2) & 1 == 1 && interrupt_on_equal_lyc {
+        if (value >> 2) & 1 != 0 && interrupt_on_equal_lyc {
                 return true;
         }
-        if (value >> 3) & 1 == 1 && self.mode == PPUMode::VBlank {
+        if (value >> 3) & 1 != 0 && self.mode == PPUMode::VBlank {
             return true;
-        } else if (value >> 4) & 1 == 1 && self.mode == PPUMode::HBlank {
+        } else if (value >> 4) & 1 != 0 && self.mode == PPUMode::HBlank {
             return true;
-        } else if (value >> 5) & 1 == 1 && self.mode == PPUMode::OAMScan {
+        } else if (value >> 5) & 1 != 0 && self.mode == PPUMode::OAMScan {
             return true;
         } else {
             return false;
         }
     } 
+
+    fn render_current_frame(&mut self) {
+        let mut texture = self.texture_creator.create_texture_streaming(PixelFormatEnum::RGB24, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32).map_err(|e| e.to_string()).unwrap();
+        texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
+            for y in 0..SCREEN_HEIGHT {
+                for x in 0..SCREEN_WIDTH {
+                    let offset = y * pitch + x * 3;
+                    let value = self.img[y * SCREEN_WIDTH + x];
+                    buffer[offset] = value;
+                    buffer[offset + 1] = value;
+                    buffer[offset + 2] = value;
+                }
+            }
+        }).unwrap();
+        
+        self.canvas.clear();
+        self.canvas.copy(&texture, None, Some(sdl2::rect::Rect::new(0, 0, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32))).unwrap();
+        // self.canvas.copy_ex(
+        //     &texture,
+        //     None,
+        //     Some(sdl2::rect::Rect::new(0, 0, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)),
+        //     0.0,
+        //     None,
+        //     false,
+        //     false,
+        // ).unwrap();
+        self.canvas.present();
+    }
+
+
+    fn oam_scan_step(&mut self, memory: &mut AddressSpace) {
+        if !self.render_window_on_cur_frame && self.ly == wy(memory) as u8 && window_enabled(memory) {
+            self.render_window_on_cur_frame = true;
+            self.wly = 0;
+        }
+        if self.dot == 0 {
+            memory.ppu_write_LY_update_STAT(self.ly);
+            if self.ly == 0 {
+                let raw_frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
+                let time_to_wait = 1.0/59.7 - raw_frame_time_seconds - 0.00006;
+                if time_to_wait > 0.0 {
+                    std::thread::sleep(Duration::from_secs_f64(time_to_wait));
+                }
+                let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
+                let fps = 1.0 / frame_time_seconds;
+                println!("FPS: {fps:.1}, raw frame time: {:.3} ms ({:.1} FPS)", raw_frame_time_seconds * 1000.0, 1.0 / raw_frame_time_seconds);
+                self.frame_start_t = Instant::now();
+            }
+        }
+        if self.dot == 80 {
+            self.mode = PPUMode::Drawing;
+
+            let sprite_height: u8 = if get_obj_size(memory) == false {8} else {16};
+            let sprites_disabled = !get_obj_enabled(memory);
+
+            for sprite_i in 0..40 {
+                let sprite = SpriteData::new((sprite_i * 4) as u8, memory);
+                let short_sprite_hidden = sprite.y < 8 && sprite_height == 8;
+                let sprite_hidden_0 = sprite.y == 0;
+                let sprite_hidden_160 = sprite.y == 160;
+                let sprites_full = self.line_objects.len() == 10;
+                let stop_scanning = sprites_disabled || short_sprite_hidden || sprite_hidden_0 || sprite_hidden_160 || sprites_full;
+                if !stop_scanning{
+                    if self.ly + 16 >= sprite.y && self.ly + 16 < sprite.y + sprite_height {
+                        self.line_objects.push(sprite);
+                    }
+                }
+            }
+        } else {
+            self.dot += 1;
+        }
+    }
+
+    fn drawing_step(&mut self, memory: &mut AddressSpace) {
+        if self.dot == 80 {
+            // memory.lock_oam();
+            // memory.lock_vram();
+        }
+        if self.dot == 80 + 172 { 
+            self.mode = PPUMode::HBlank;
+            memory.unlock_oam();
+            memory.unlock_vram();
+            self.show(memory);
+        }
+        self.dot += 1;
+    }
+
+    fn hblank_step(&mut self, memory: &mut AddressSpace) {
+        if self.dot == NUM_DOTS_PER_LINE { 
+            self.dot = 0; 
+            self.ly += 1; 
+            if self.ly == 144 { 
+                self.mode = PPUMode::VBlank;
+                memory.unlock_oam();
+                memory.request_interrupt(Interrupt::VBlank);
+
+                self.render_current_frame()
+            } else { 
+                if self.render_window_on_cur_frame && wx(memory) <= 166 {
+                    self.wly += 1;
+                }
+                self.mode = PPUMode::OAMScan;
+                self.line_objects.clear();
+                // memory.lock_oam();
+            };
+            memory.ppu_write_LY_update_STAT(self.ly);
+        } else {
+            self.dot += 1;
+        }
+    }
+
+    fn vblank_step(&mut self, memory: &mut AddressSpace) {
+        if self.dot == NUM_DOTS_PER_LINE { 
+            self.dot = 0; 
+            self.ly += 1; 
+            memory.ppu_write_LY_update_STAT(self.ly);
+        } else {
+            self.dot += 1;
+        }
+        if self.ly == NUM_SCAN_LINES - 1 { 
+            self.ly = 0; 
+            self.mode = PPUMode::OAMScan;
+            self.line_objects.clear();
+            self.render_window_on_cur_frame = false;
+            self.wly = 0;
+            // memory.lock_oam();
+            memory.ppu_write_LY_update_STAT(self.ly);
+        }
+    }
+
+    fn set_next_mode(&mut self, memory: &mut AddressSpace) {
+        match self.mode {
+            PPUMode::OAMScan => self.oam_scan_step(memory),
+            PPUMode::Drawing => self.drawing_step(memory),
+            PPUMode::HBlank => self.hblank_step(memory),
+            PPUMode::VBlank => self.vblank_step(memory),
+        };
+    }
+
+    fn handle_stat(&mut self, memory: &mut AddressSpace) {
+        self.update_stat(memory);
+        let new_stat_flag = self.check_stat_irq(memory);
+        if !self.stat_flag && new_stat_flag {
+            memory.request_interrupt(Interrupt::LCD);
+            self.stat_flag = true;
+        } else {
+            // println!("\r");
+            self.stat_flag = new_stat_flag;
+        }
+    }
     
 
     fn single_tick(&mut self, memory: &mut AddressSpace) {
@@ -182,135 +332,9 @@ impl PPU {
                 memory.ppu_write_LY_update_STAT(self.ly)
             }
         }
-        match self.mode {
-            PPUMode::OAMScan => {
-                if !self.render_window_on_cur_frame && self.ly == wy(memory) as u8 && window_enabled(memory) {
-                    self.render_window_on_cur_frame = true;
-                    self.wly = 0;
-                }
-                if self.dot == 0 {
-                    memory.ppu_write_LY_update_STAT(self.ly);
-                    if self.ly == 0 {
-                        let raw_frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
-                        let time_to_wait = 1.0/59.7 - raw_frame_time_seconds - 0.00006;
-                        if time_to_wait > 0.0 {
-                            std::thread::sleep(Duration::from_secs_f64(time_to_wait));
-                        }
-                        let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
-                        let fps = 1.0 / frame_time_seconds;
-                        println!("FPS: {fps:.1}, raw frame time: {:.3} ms ({:.1} FPS)", raw_frame_time_seconds * 1000.0, 1.0 / raw_frame_time_seconds);
-                        self.frame_start_t = Instant::now();
-                    }
-                }
-                if self.dot == 80 {
-                    self.mode = PPUMode::Drawing;
+        self.set_next_mode(memory);
 
-                    let sprite_height: u8 = if get_obj_size(memory) == false {8} else {16};
-                    let sprites_disabled = !get_obj_enabled(memory);
-
-                    for sprite_i in 0..40 {
-                        let sprite = SpriteData::new((sprite_i * 4) as u8, memory);
-                        let short_sprite_hidden = sprite.y < 8 && sprite_height == 8;
-                        let sprite_hidden_0 = sprite.y == 0;
-                        let sprite_hidden_160 = sprite.y == 160;
-                        let sprites_full = self.line_objects.len() == 10;
-                        let stop_scanning = sprites_disabled || short_sprite_hidden || sprite_hidden_0 || sprite_hidden_160 || sprites_full;
-                        if !stop_scanning{
-                            if self.ly + 16 >= sprite.y && self.ly + 16 < sprite.y + sprite_height {
-                                self.line_objects.push(sprite);
-                            }
-                        }
-                    }
-                } else {
-                    self.dot += 1;
-                }
-            },
-            PPUMode::Drawing => {
-                if self.dot == 80 {
-                    // memory.lock_oam();
-                    // memory.lock_vram();
-                }
-                if self.dot == 80 + 172 { 
-                    self.mode = PPUMode::HBlank;
-                    memory.unlock_oam();
-                    memory.unlock_vram();
-                    self.show(memory);
-                }
-                self.dot += 1;
-            },
-            PPUMode::HBlank => {
-                if self.dot == NUM_DOTS_PER_LINE { 
-                    self.dot = 0; 
-                    self.ly += 1; 
-                    if self.ly == 144 { 
-                        self.mode = PPUMode::VBlank;
-                        memory.unlock_oam();
-                        memory.request_interrupt(Interrupt::VBlank);
-
-                        let mut texture = self.texture_creator.create_texture_streaming(PixelFormatEnum::RGB24, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32).map_err(|e| e.to_string()).unwrap();
-                        texture.with_lock(None, |buffer: &mut [u8], pitch: usize| {
-                            for y in 0..SCREEN_HEIGHT {
-                                for x in 0..SCREEN_WIDTH {
-                                    let offset = y * pitch + x * 3;
-                                    let value = self.img[y * SCREEN_WIDTH + x];
-                                    buffer[offset] = value;
-                                    buffer[offset + 1] = value;
-                                    buffer[offset + 2] = value;
-                                }
-                            }
-                        }).unwrap();
-                        
-                        self.canvas.clear();
-                        self.canvas.copy(&texture, None, Some(sdl2::rect::Rect::new(0, 0, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32))).unwrap();
-                        // self.canvas.copy_ex(
-                        //     &texture,
-                        //     None,
-                        //     Some(sdl2::rect::Rect::new(0, 0, SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32)),
-                        //     0.0,
-                        //     None,
-                        //     false,
-                        //     false,
-                        // ).unwrap();
-                        self.canvas.present();
-                    } else { 
-                        if self.render_window_on_cur_frame && wx(memory) <= 166 {
-                            self.wly += 1;
-                        }
-                        self.mode = PPUMode::OAMScan;
-                        self.line_objects.clear();
-                        // memory.lock_oam();
-                    };
-                    memory.ppu_write_LY_update_STAT(self.ly);
-                } else {
-                    self.dot += 1;
-                }
-            },
-            PPUMode::VBlank => {
-                if self.dot == NUM_DOTS_PER_LINE { 
-                    self.dot = 0; 
-                    self.ly += 1; 
-                    memory.ppu_write_LY_update_STAT(self.ly);
-                } else {
-                    self.dot += 1;
-                }
-                if self.ly == NUM_SCAN_LINES - 1 { 
-                    self.ly = 0; 
-                    self.mode = PPUMode::OAMScan;
-                    self.line_objects.clear();
-                    self.render_window_on_cur_frame = false;
-                    self.wly = 0;
-                    // memory.lock_oam();
-                    memory.ppu_write_LY_update_STAT(self.ly);
-                };
-            },
-        };
-    self.update_stat(memory);
-    if !self.stat_flag && self.check_stat_irq(memory) {
-        memory.request_interrupt(Interrupt::LCD);
-    } else {
-        // println!("\r");
-    }
-    self.stat_flag = self.check_stat_irq(memory);
+    self.handle_stat(memory);
     self.past_tick_lyc = Some(lyc);
     self.tick_i += 1
     }
@@ -319,17 +343,17 @@ impl PPU {
         memory.ppu_write_LY_update_STAT(self.ly);
         let mut value = memory.read(STAT_ADDR);
 
-        if (value >> 3) & 1 == 1 && self.mode == PPUMode::VBlank {
+        if (value >> 3) & 1 != 1 && self.mode == PPUMode::VBlank {
             value |= 1 << 3;
         } else {
             value &= 0xFF ^ (1 << 3);
         }
-        if (value >> 4) & 1 == 1 && self.mode == PPUMode::HBlank {
+        if (value >> 4) & 1 != 1 && self.mode == PPUMode::HBlank {
             value |= 1 << 4;
         } else {
             value &= 0xFF ^ (1 << 4);
         }
-        if (value >> 5) & 1 == 1 && self.mode == PPUMode::OAMScan {
+        if (value >> 5) & 1 != 1 && self.mode == PPUMode::OAMScan {
             value |= 1 << 5;
         } else {
             value &= 0xFF ^ (1 << 5);

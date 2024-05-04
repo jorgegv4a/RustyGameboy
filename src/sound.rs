@@ -89,6 +89,7 @@ pub struct Channel {
     capacity: f32,
     negative_sweep_calc_executed: bool,
     lfsr: u16,
+    past_sample: u8,
 
 }
 
@@ -112,6 +113,7 @@ impl Channel {
             capacity: 0.0,
             negative_sweep_calc_executed: false,
             lfsr: 0,
+            past_sample: 255,
         }
     }
 
@@ -170,6 +172,8 @@ impl APU {
                 capacity: 0.0,
             }
         }).unwrap();
+
+        device.resume();
 
         APU {
             audio_subsystem,
@@ -455,13 +459,20 @@ impl APU {
     }
 
     fn ch3_get_next_sample(&mut self, memory: &AddressSpace) -> u8 {
+        let wave_value;
+
         self.ch3.period_step += 1;
         if self.ch3.period_step >= 2048 {
             self.ch3.sample_index = (self.ch3.sample_index + 1) % 32;
             self.ch3.period = ((ch3_initial_period_high(memory) as u16) << 8) + ch3_initial_period_low(memory) as u16;
             self.ch3.period_step = self.ch3.period;
-        } 
-        let wave_value = ch3_wave_sample(self.ch3.sample_index, memory);
+
+            // wave index changed, read from memory
+            wave_value = ch3_wave_sample(self.ch3.sample_index, memory);
+        } else {
+            wave_value = self.ch3.past_sample;
+        }
+        self.ch3.past_sample = wave_value;
         match ch3_output_level(memory) {
             OutputLevel::Full => wave_value,
             OutputLevel::Half => wave_value >> 1,
@@ -655,21 +666,110 @@ impl APU {
         }
     }
 
-    pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
-        let device_status = self.device.status();
-        if !apu_enabled(memory) {
-            if device_status == AudioStatus::Playing {
-                // Pause playback
-                self.device.pause();
-            }
-            return;
-        } else {
-            if apu_enabled(memory) && device_status != AudioStatus::Playing {
-                // Start playback
-                self.device.resume();
-                self.frame_sequencer_i = 0;
-            }
+    fn mix_samples(&mut self, memory: &AddressSpace) -> (f32, f32) {
+        let ch1_analog = self.ch1.buffer_to_analog(self.last_ch1_sample);
+        let ch2_analog = self.ch2.buffer_to_analog(self.last_ch2_sample);
+        let ch3_analog = self.ch3.buffer_to_analog(self.last_ch3_sample);
+        let ch4_analog = self.ch4.buffer_to_analog(self.last_ch4_sample);
+
+        let mut left_analog: f32 = 0.0;
+        let mut right_analog: f32 = 0.0;
+
+
+        if ch1_pan_right(memory) {
+            right_analog += ch1_analog;
         }
+        if ch1_pan_left(memory) {
+            left_analog += ch1_analog;
+        }
+
+        if ch2_pan_right(memory) {
+            right_analog += ch2_analog;
+        }
+        if ch2_pan_left(memory) {
+            left_analog += ch2_analog;
+        }
+
+        if ch3_pan_right(memory) {
+            right_analog += ch3_analog;
+        }
+        if ch3_pan_left(memory) {
+            left_analog += ch3_analog;
+        }
+
+        if ch4_pan_right(memory) {
+            right_analog += ch4_analog;
+        }
+        if ch4_pan_left(memory) {
+            left_analog += ch4_analog;
+        }
+
+        left_analog = (left_analog / 4.0) * ((master_left_volume(memory) + 1) as f32 / 8.0);
+        right_analog = (right_analog / 4.0) * ((master_right_volume(memory) + 1) as f32 / 8.0);
+        (left_analog, right_analog)
+    }
+
+    fn update_samples(&mut self, memory: &mut AddressSpace) {
+        let ch4_sample = self.ch4_tick(memory);
+        self.last_ch4_sample = ch4_sample;
+
+        if self.clock % 4 == 0 {
+            let ch1_sample = self.ch1_tick(memory);
+            let ch2_sample = self.ch2_tick(memory);
+            self.last_ch1_sample = ch1_sample;
+            self.last_ch2_sample = ch2_sample;
+        }
+
+        if self.clock % 2 == 0 {
+            let ch3_sample = self.ch3_tick(memory);
+            self.last_ch3_sample = ch3_sample;
+        }
+    }
+
+    fn output_samples_if_req(&mut self, memory: &mut AddressSpace) {
+        if self.buffer_i == AUDIO_BUFFER_NUM_SAMPLES {
+            self.buffer_i = 0;
+            let outcome = self.out_samples.send(self.buffer.clone());
+        }
+    }
+
+    fn gather_samples(&mut self, memory: &mut AddressSpace) {
+        self.resample_frac += (TARGET_SAMPLE_RATE as f32 / 4194304.0).fract();
+
+        if self.resample_frac >= 1.0 {
+            self.resample_frac -= 1.0;
+            let (left_analog, right_analog) = self.mix_samples(memory);
+            self.buffer[2 * self.buffer_i] = left_analog;
+            self.buffer[2 * self.buffer_i + 1] = right_analog;
+            self.buffer_i += 1;
+
+            // self.debug_file.write_all(&self.buffer[2 * self.buffer_i].to_be_bytes());
+
+            self.output_samples_if_req(memory);
+        }
+    }
+
+    pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
+        // let device_status = self.device.status();
+        // if !apu_enabled(memory) {
+        //     if device_status == AudioStatus::Playing {
+        //         // Pause playback
+        //         self.device.pause();
+        //     }
+        //     return;
+        // }
+        // if apu_enabled(memory) && device_status != AudioStatus::Playing {
+        //     // Start playback
+        //     self.device.resume();
+        //     self.frame_sequencer_i = 0;
+        // }
+
+        // let device_status = self.device.status();
+        if !apu_enabled(memory) {
+            self.frame_sequencer_i = 0;
+            return;
+        }
+
         for i in 0..nticks {
             let div = (self.clock >> (4 + 8)) & 1;
             if div == 0 && self.div.unwrap_or(0) == 1 {
@@ -677,75 +777,9 @@ impl APU {
                 self.single_tick(memory);
             }
 
-            let ch4_sample = self.ch4_tick(memory);
-            self.last_ch4_sample = ch4_sample;
+            self.update_samples(memory);
 
-            if self.clock % 4 == 0 {
-                let ch1_sample = self.ch1_tick(memory);
-                let ch2_sample = self.ch2_tick(memory);
-                self.last_ch1_sample = ch1_sample;
-                self.last_ch2_sample = ch2_sample;
-            }
-
-            if self.clock % 2 == 0 {
-                let ch3_sample = self.ch3_tick(memory);
-                self.last_ch3_sample = ch3_sample;
-            }
-
-            self.resample_frac += (TARGET_SAMPLE_RATE as f32 / 4194304.0).fract();
-
-            if self.resample_frac >= 1.0 {
-                self.resample_frac -= 1.0;
-                let ch1_analog = self.ch1.buffer_to_analog(self.last_ch1_sample);
-                let ch2_analog = self.ch2.buffer_to_analog(self.last_ch2_sample);
-                let ch3_analog = self.ch3.buffer_to_analog(self.last_ch3_sample);
-                let ch4_analog = self.ch4.buffer_to_analog(self.last_ch4_sample);
-
-                let mut left_analog: f32 = 0.0;
-                let mut right_analog: f32 = 0.0;
-
-
-                if ch1_pan_right(memory) {
-                    right_analog += ch1_analog;
-                }
-                if ch1_pan_left(memory) {
-                    left_analog += ch1_analog;
-                }
-
-                if ch2_pan_right(memory) {
-                    right_analog += ch2_analog;
-                }
-                if ch2_pan_left(memory) {
-                    left_analog += ch2_analog;
-                }
-
-                if ch3_pan_right(memory) {
-                    right_analog += ch3_analog;
-                }
-                if ch3_pan_left(memory) {
-                    left_analog += ch3_analog;
-                }
-
-                if ch4_pan_right(memory) {
-                    right_analog += ch4_analog;
-                }
-                if ch4_pan_left(memory) {
-                    left_analog += ch4_analog;
-                }
-
-                left_analog = (left_analog / 4.0) * ((master_left_volume(memory) + 1) as f32 / 8.0);
-                right_analog = (right_analog / 4.0) * ((master_right_volume(memory) + 1) as f32 / 8.0);
-                self.buffer[2 * self.buffer_i] = left_analog;
-                self.buffer[2 * self.buffer_i + 1] = right_analog;
-
-                // self.debug_file.write_all(&self.buffer[2 * self.buffer_i].to_be_bytes());
-
-                self.buffer_i += 1;
-                if self.buffer_i == AUDIO_BUFFER_NUM_SAMPLES {
-                    self.buffer_i = 0;
-                    let outcome = self.out_samples.send(self.buffer.clone());
-                }
-            }
+            self.gather_samples(memory);
 
             // TODO: continue mixing samples
             self.clock += 1;
