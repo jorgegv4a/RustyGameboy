@@ -1,4 +1,6 @@
 #![allow(non_camel_case_types)]
+use std::io::{Read, Write};
+
 use crate::constants::*;
 use crate::interrupt::Interrupt;
 use crate::mappers::{Addressable, Cartridge, NoCartridge, RomOnly, MBC1, MBC3};
@@ -38,6 +40,8 @@ pub struct AddressSpace {
     clock: u64,
     mapper: Box<dyn Addressable>,
     ch1_period_written: bool,
+    save_ram: bool,
+    game_title: String,
 }
 
 impl AddressSpace {
@@ -61,6 +65,26 @@ impl AddressSpace {
             clock: 0,
             mapper: Box::new(NoCartridge::new(Vec::new())),
             ch1_period_written: false,
+            save_ram: false,
+            game_title: String::new(),
+        }
+    }
+
+    pub fn quit(&self) {
+        if !self.save_ram {
+            return
+        }
+        if self.mapper.cartridge_type() == Some(Cartridge::MBC1) || self.mapper.cartridge_type() == Some(Cartridge::MBC3) {
+            let dir = format!("./saved_games/{}", self.game_title);
+            let state = self.mapper.save_persistent_state();
+            let result = std::fs::create_dir_all(&dir);
+            let mut file = std::fs::OpenOptions::new()
+            .create(true) // To create a new file
+            .write(true)
+            // either use the ? operator or unwrap since it returns a Result
+            .open(format!("{dir}/SAVE.bin")).unwrap();
+
+            file.write_all(&state);
         }
     }
 
@@ -72,16 +96,39 @@ impl AddressSpace {
     }
 
     pub fn load_rom(&mut self, game_bytes: Vec<u8>) -> Result<(), String> {
+        let mut title_bytes = vec![0u8; game_bytes[0x134..0x143].len()];
+        title_bytes.copy_from_slice(&game_bytes[0x134..0x143]);
+        let title = std::str::from_utf8(&title_bytes).unwrap();
         let cartridge_type: Cartridge = Cartridge::from(game_bytes[0x147]);
         match cartridge_type {
             Cartridge::RomOnly => self.mapper = Box::new(RomOnly::new(game_bytes)),
             Cartridge::MBC1 => self.mapper = Box::new(MBC1::new(game_bytes)),
-            Cartridge::MBC1_RAM_BATTERY => self.mapper = Box::new(MBC1::new(game_bytes)),
+            Cartridge::MBC1_RAM_BATTERY => {
+                self.mapper = Box::new(MBC1::new(game_bytes));
+                self.save_ram = true;
+            },
             Cartridge::MBC3 => self.mapper = Box::new(MBC3::new(game_bytes)),
-            Cartridge::MBC3_RAM_BATTERY => self.mapper = Box::new(MBC3::new(game_bytes)),
+            Cartridge::MBC3_RAM_BATTERY => {
+                self.mapper = Box::new(MBC3::new(game_bytes));
+                self.save_ram = true;
+            },
             _ => unimplemented!("No mapper implemented for cartridge type {cartridge_type:?}"),
         };
         println!("Cartridge mapper '{cartridge_type:?}'");
+        println!("Title '{title}'");
+        self.game_title = title.trim_end_matches(char::from(0)).to_string();
+
+
+        if self.mapper.cartridge_type() == Some(Cartridge::MBC1) || self.mapper.cartridge_type() == Some(Cartridge::MBC3) {
+            let dir = format!("./saved_games/{}", self.game_title);
+            let save_path = format!("{dir}/SAVE.bin");
+            let data = std::fs::read(save_path).unwrap_or(Vec::new());
+            if data.len() > 0 {
+                println!("Found save, loading");
+                self.mapper.load_persistent_state(data);
+            }
+        }
+
         Ok(())
     }
 

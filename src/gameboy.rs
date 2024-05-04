@@ -123,18 +123,9 @@ impl Gameboy {
                 self.memory.write(SC_ADDR, 0);
             }
             if quit {
+                self.memory.quit();
                 return;
             }
-            // for event in self.events.poll_iter() {
-            //     match event {
-            //         Event::Quit { .. }
-            //         | Event::KeyDown {
-            //             keycode: Some(Keycode::Escape),
-            //             ..
-            //         } => return,
-            //         _ => {}
-            //     }
-            // }
         }
     }
 }

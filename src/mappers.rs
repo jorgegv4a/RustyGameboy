@@ -18,6 +18,8 @@ pub trait Addressable {
     fn new(game_bytes: Vec<u8>) -> Self where Self: Sized;
     fn read(&self, index: u16) -> u8;
     fn write(&mut self, index: u16, value: u8);
+    fn save_persistent_state(&self) -> Vec<u8>;
+    fn load_persistent_state(&mut self, state: Vec<u8>);
     fn cartridge_type(&self) -> Option<Cartridge>;
     fn tick(&mut self, nticks: u8);
 }
@@ -42,6 +44,12 @@ impl Addressable for NoCartridge {
     }
 
     fn write(&mut self, index: u16, value: u8) {}
+
+    fn save_persistent_state(&self) -> Vec<u8> {
+        vec![]
+    }
+
+    fn load_persistent_state(&mut self, state: Vec<u8>) {}
 
     fn cartridge_type(&self) -> Option<Cartridge> {
         None
@@ -75,6 +83,12 @@ impl Addressable for RomOnly {
     }
 
     fn write(&mut self, index: u16, value: u8) {}
+
+    fn save_persistent_state(&self) -> Vec<u8> {
+        vec![]
+    }
+
+    fn load_persistent_state(&mut self, state: Vec<u8>) {}
 
     fn cartridge_type(&self) -> Option<Cartridge> {
         Some(Cartridge::RomOnly)
@@ -216,6 +230,14 @@ impl Addressable for MBC1 {
         };
     }
 
+    fn save_persistent_state(&self) -> Vec<u8> {
+        self.ram.clone()
+    }
+
+    fn load_persistent_state(&mut self, state: Vec<u8>) {
+        self.ram = state;
+    }
+    
     fn cartridge_type(&self) -> Option<Cartridge> {
         Some(Cartridge::MBC1)
     }
@@ -430,6 +452,14 @@ impl Addressable for MBC3 {
             }
             _ => unreachable!("Invalid access to MBC3 cartridge at index {index}"),
         };
+    }
+
+    fn save_persistent_state(&self) -> Vec<u8> {
+        self.ram.clone()
+    }
+
+    fn load_persistent_state(&mut self, state: Vec<u8>) {
+        self.ram = state;
     }
 
     fn cartridge_type(&self) -> Option<Cartridge> {
