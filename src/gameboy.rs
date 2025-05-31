@@ -86,9 +86,10 @@ impl Gameboy {
         loop {
             let start_t = self.cpu.clock;
             // let t0 = Instant::now();
-            if DEBUG {
-                println!("{}", self.cpu);
-            }
+            // if DEBUG {
+                // println!("{}", self.cpu);
+            // }
+            println!("{}", self.cpu);
             if self.cpu.enable_interrupts_next_instr {
                 self.cpu.master_interrupt_enable = true;
                 self.cpu.enable_interrupts_next_instr = false;
@@ -118,7 +119,7 @@ impl Gameboy {
             self.apu.tick(nticks, &mut self.memory);
             if self.memory.read(SC_ADDR) == 0x81 {
                 if !DEBUG {
-                    print!("{}", std::char::from_u32(self.memory.read(SB_ADDR) as u32).unwrap_or('?'));
+                    // println!("SERIAL: {}", std::char::from_u32(self.memory.read(SB_ADDR) as u32).unwrap_or('?'));
                 }
                 self.memory.write(SC_ADDR, 0);
             }

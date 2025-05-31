@@ -167,7 +167,7 @@ impl CPU {
         let opcode = memory.read(self.registers.PC());
         self.registers.increment_PC();
         self.tick(4);
-        opcode   
+        opcode
     }
 
     pub fn decode(&mut self, opcode_byte: u8, memory: &AddressSpace) -> (Opcode, u16) {
@@ -191,14 +191,24 @@ impl CPU {
             _ => opcode_dict.length - 1,
         };
 
+        let mut operands_str = String::new();
         let mut extra_bytes: Vec<u8> = Vec::new();
+
         for _ in 0..code_length {
-            extra_bytes.push(self.fetch(&memory));
+            let value = self.fetch(memory);
+            extra_bytes.push(value);
+            operands_str.push_str(&format!("{:02X}, ", value));
         }
 
-        if opcode == 0x40 {
-            println!()
+        // Remove the trailing ", " if any
+        if operands_str.len() >= 2 {
+            operands_str.truncate(operands_str.len() - 2);
         }
+        // if opcode == 0x40 {
+        //     println!()
+        // }
+
+        println!("{opcode_dict}; operands: {operands_str}");
 
         let mut remaining_cycles = opcode_dict.cycles[0] - ((self.clock - start_clock_t) as u8);
         if opcode & 0xFF00 == 0 { 
@@ -290,7 +300,10 @@ impl CPU {
 
             // CALL/RESET/RETURN
             } else if opcode & 0xE7 == 0xC4 {
-                self.handle_call_cond(opcode, extra_bytes, memory);
+                let branch = self.handle_call_cond(opcode, extra_bytes, memory);
+                if !branch {
+                    remaining_cycles = opcode_dict.cycles[1] - ((self.clock - start_clock_t) as u8);
+                }
 
             } else if opcode == 0xCD {
                 self.handle_call_d16(extra_bytes, memory);
@@ -480,8 +493,10 @@ impl CPU {
         if with_carry {
             self.registers.A = self.registers.A.wrapping_sub(1);
         }
-        self.registers.flag_C_from_bool((value_pre as u16) < (operand as u16) + (with_carry as u16));
-        self.registers.flag_H_from_bool((value_pre & 0xF) < (operand & 0xF) + (with_carry as u8));
+        let carry = (value_pre as u16) < (operand as u16) + (with_carry as u16);
+        let half = (value_pre & 0xF) < (operand & 0xF) + (with_carry as u8);
+        self.registers.flag_C_from_bool(carry);
+        self.registers.flag_H_from_bool(half);
         self.registers.set_flag_N();
         self.registers.flag_Z_from_bool(self.registers.A == 0);
     }
@@ -646,7 +661,7 @@ impl CPU {
         self.write_double(&DoubleDataLoc::HL, new_value);
         self.registers.flag_C_from_bool(overflow);
         let low_reg_carry = ((value_pre & 0xFF) + (operand_value & 0xFF) > 0xFF) as u16;
-        self.registers.flag_H_from_bool(((value_pre >> 8) & 0xF) + ((operand_value >> 8) & 0xF) + low_reg_carry > 0xF);
+        self.registers.flag_H_from_bool((value_pre & 0xFFF) + (operand_value & 0xFFF) > 0xFFF);
         self.registers.clear_flag_N();
 
     }

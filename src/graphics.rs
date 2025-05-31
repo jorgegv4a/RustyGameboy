@@ -186,7 +186,7 @@ impl PPU {
                 }
                 let frame_time_seconds = self.frame_start_t.elapsed().as_secs_f64();
                 let fps = 1.0 / frame_time_seconds;
-                println!("FPS: {fps:.1}, raw frame time: {:.3} ms ({:.1} FPS)", raw_frame_time_seconds * 1000.0, 1.0 / raw_frame_time_seconds);
+                // println!("FPS: {fps:.1}, raw frame time: {:.3} ms ({:.1} FPS)", raw_frame_time_seconds * 1000.0, 1.0 / raw_frame_time_seconds);
                 self.frame_start_t = Instant::now();
             }
         }
