@@ -129,7 +129,7 @@ impl PPU {
         let interrupt_on_equal_lyc = (value >> 6) & 1 != 0;
 
         if (value >> 2) & 1 != 0 && interrupt_on_equal_lyc {
-                return true;
+            return true;
         }
         if (value >> 3) & 1 != 0 && self.mode == PPUMode::VBlank {
             return true;
@@ -281,7 +281,7 @@ impl PPU {
     }
 
     fn handle_stat(&mut self, memory: &mut AddressSpace) {
-        self.update_stat(memory);
+        memory.ppu_write_LY_update_STAT(self.ly);
         let new_stat_flag = self.check_stat_irq(memory);
         if !self.stat_flag && new_stat_flag {
             memory.request_interrupt(Interrupt::LCD);
@@ -334,33 +334,9 @@ impl PPU {
         }
         self.set_next_mode(memory);
 
-    self.handle_stat(memory);
-    self.past_tick_lyc = Some(lyc);
-    self.tick_i += 1
-    }
-
-    fn update_stat(&mut self, memory: &mut AddressSpace) {
-        memory.ppu_write_LY_update_STAT(self.ly);
-        let mut value = memory.read(STAT_ADDR);
-
-        if (value >> 3) & 1 != 1 && self.mode == PPUMode::VBlank {
-            value |= 1 << 3;
-        } else {
-            value &= 0xFF ^ (1 << 3);
-        }
-        if (value >> 4) & 1 != 1 && self.mode == PPUMode::HBlank {
-            value |= 1 << 4;
-        } else {
-            value &= 0xFF ^ (1 << 4);
-        }
-        if (value >> 5) & 1 != 1 && self.mode == PPUMode::OAMScan {
-            value |= 1 << 5;
-        } else {
-            value &= 0xFF ^ (1 << 5);
-        }
-
-        memory.ppu_write_stat(value);
-
+        self.handle_stat(memory);
+        self.past_tick_lyc = Some(lyc);
+        self.tick_i += 1
     }
 
     pub fn tick(&mut self, nticks: u8, memory: &mut AddressSpace) {
@@ -444,11 +420,11 @@ impl PPU {
 
         let sprite_height: usize = if get_obj_size(memory) == false {8} else {16};
 
-        let BPG = memory.read(BGP_ADDR);
+        let BGP = memory.read(BGP_ADDR);
         let OBP0 = memory.read(OBP0_ADDR);
         let OBP1 = memory.read(OBP1_ADDR);
 
-        let bpg_palette = make_palette(BPG);
+        let BGP_palette = make_palette(BGP);
         let obp0_palette = make_palette(OBP0);
         let obp1_palette = make_palette(OBP1);
 
@@ -473,9 +449,9 @@ impl PPU {
                 let tile_y = src_row / 8;
                 let tile_offset_y = src_row % 8;
 
-                let col_row = i + 7 - wx(memory);
-                let tile_x = col_row / 8;
-                let tile_offset_x = col_row % 8;
+                let src_col = i + 7 - wx(memory);
+                let tile_x = src_col / 8;
+                let tile_offset_x = src_col % 8;
 
                 let tile_map_idx = tile_y * 32 + tile_x;
                 let tile_offset = memory.read(win_tile_map_base_address + tile_map_idx as u16) as u16;
@@ -575,10 +551,10 @@ impl PPU {
                 if get_bg_win_display(memory) {
                     if sprite_color == 0 {
                         color = bg_color;
-                        color_palette = ColorPalette::BPG;
+                        color_palette = ColorPalette::BGP;
                     } else if sprite_prio && bg_color != 0 {
                         color = bg_color;
-                        color_palette = ColorPalette::BPG;
+                        color_palette = ColorPalette::BGP;
                     } else {
                         color = sprite_color;
                         color_palette = sprite_palette;
@@ -590,16 +566,16 @@ impl PPU {
             } else {
                 if get_bg_win_display(memory) {
                     color = bg_color;
-                    color_palette = ColorPalette::BPG;
+                    color_palette = ColorPalette::BGP;
                 } else {
                     color = 0;
-                    color_palette = ColorPalette::BPG;
+                    color_palette = ColorPalette::BGP;
                 }
             }
             // color = bg_color;
             let color_value = match (color_palette, color) {
-                // (ColorPalette::BPG, 4) => Color::RGB(255, 255, 255),
-                (ColorPalette::BPG, _) => bpg_palette[color as usize].into(),
+                // (ColorPalette::BGP, 4) => Color::RGB(255, 255, 255),
+                (ColorPalette::BGP, _) => BGP_palette[color as usize].into(),
                 (ColorPalette::OBP1, 0) => Color::RGB(0, 255, 0),
                 (ColorPalette::OBP0, 0) => Color::RGB(0, 255, 0),
                 (ColorPalette::OBP0, _) => obp0_palette[color as usize].into(),

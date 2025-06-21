@@ -45,7 +45,7 @@ impl From<u8> for ColorId {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ColorPalette {
-    BPG,
+    BGP,
     OBP0,
     OBP1,
 }

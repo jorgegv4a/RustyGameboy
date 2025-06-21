@@ -333,6 +333,7 @@ impl Addressable for MBC3 {
             0x4000..=0x7FFF => {
                 let bank_number = self.rom_select_register as usize;
                 let bank_offset = bank_number * 0x4000;
+                // println!("0x4000-0x7FFF: bank_number {bank_number}, index: {index}");
                 self.rom[bank_offset + index as usize - 0x4000]
             },
             0xA000..=0xBFFF => {
@@ -341,13 +342,8 @@ impl Addressable for MBC3 {
                 }
 
                 match self.ram_select_register {
-                    0..=4 => {
-                        let bank_number;
-                        if self.bank_mode_register == 0 {
-                            bank_number = 0;
-                        } else {
-                            bank_number = self.ram_select_register as usize;
-                        }
+                    0..=7 => {
+                        let bank_number = self.ram_select_register as usize;
                         let bank_offset = bank_number * 0x2000;
                         self.ram[bank_offset + index as usize - 0xA000]
                     }
@@ -391,13 +387,7 @@ impl Addressable for MBC3 {
                 }
             }
             0x4000..=0x5FFF => {
-                match value {
-                    0..=0x3 => self.ram_select_register = value & 0x03,
-                    0x8..=0xC => {
-                        self.ram_select_register = value;
-                    },
-                    _ => ()
-                }
+                self.ram_select_register = value & 0x7F
             }
             0x6000..=0x7FFF => {
                 if self.latch_clock == 0 && value == 1 {
@@ -411,7 +401,7 @@ impl Addressable for MBC3 {
                 }
 
                 match self.ram_select_register {
-                    0..=4 => {
+                    0..=0x7 => {
                         let bank_number;
                         if self.bank_mode_register == 0 {
                             bank_number = 0;

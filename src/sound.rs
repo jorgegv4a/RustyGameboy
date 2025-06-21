@@ -61,7 +61,7 @@ impl AudioCallback for AudioPlayer {
                 }
             },
             Err(s) => {
-                println!("Failed to receive");
+                // println!("Failed to receive");
                 for (i, x) in out.iter_mut().enumerate() {
                     *x = 0.0;
                 }

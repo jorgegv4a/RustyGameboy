@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use sdl2::audio::{AudioCallback, AudioSpecDesired};
 
-use crate::constants::{IF_ADDR, IE_ADDR, SB_ADDR, SC_ADDR};
+use crate::constants::{IF_ADDR, IE_ADDR, SB_ADDR, SC_ADDR, TIMA_ADDR, TMA_ADDR, TAC_ADDR};
 use crate::cpu::{CPU, DEBUG};
 use crate::memory::AddressSpace;
 use crate::graphics::PPU;
@@ -78,18 +78,25 @@ impl Gameboy {
         let address = 0x40 + 8 * interrupt as u16;
         self.cpu.push_stack(self.cpu.registers.PC(), &mut self.memory);
         self.cpu.registers.write_PC(address);
-
+        self.cpu.clock += 12
     }
 
     pub fn power_on(&mut self) {
         self.cpu.boot(&mut self.memory);
         loop {
             let start_t = self.cpu.clock;
-            // let t0 = Instant::now();
-            // if DEBUG {
-                // println!("{}", self.cpu);
-            // }
-            println!("{}", self.cpu);
+            let t0 = Instant::now();
+            if DEBUG {
+                println!("{}", self.cpu);
+            }
+            // let formatted = self.memory.oam.iter()
+            //     .map(|byte| format!("{:02X}", byte))
+            //     .collect::<Vec<_>>()
+            //     .join("|");
+
+            // println!("{} ; OAM: |{}", self.cpu, formatted);
+            // println!("{}", self.cpu);
+            // println!("{} | int div: {} | TIMA: {} | TMA: {} | TAC: {} | IE: {} | IF: {}",self.cpu, self.memory.internal_div, self.memory.read(TIMA_ADDR), self.memory.read(TMA_ADDR), self.memory.read(TAC_ADDR), self.memory.read(IE_ADDR), self.memory.read(IF_ADDR));
             if self.cpu.enable_interrupts_next_instr {
                 self.cpu.master_interrupt_enable = true;
                 self.cpu.enable_interrupts_next_instr = false;

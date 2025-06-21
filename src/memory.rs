@@ -323,10 +323,6 @@ impl AddressSpace {
         self.oam_writeable = true;
     }
 
-    pub fn ppu_write_stat(&mut self, value: u8) {
-        self.standard_io[STAT_ADDR as usize - 0xFF00] = (value & 0x7) | (self.standard_io[STAT_ADDR as usize - 0xFF00] & 0x78);
-    }
-
     pub fn ppu_write_LY_update_STAT(&mut self, ly_value: u8) {
         self.standard_io[LCDY_ADDR as usize - 0xFF00] = ly_value;
         let lyc = self.standard_io[LYC_ADDR as usize - 0xFF00];
@@ -390,7 +386,7 @@ impl AddressSpace {
     }
 
     fn increment_div(&mut self) -> bool{
-        self.internal_div =  self.internal_div.wrapping_add(1);
+        self.internal_div = self.internal_div.wrapping_add(1);
         let tac_reg = self.standard_io[TAC_ADDR as usize - 0xFF00];
         let bit_selected = match tac_reg & 0x3 {
             0 => 9,

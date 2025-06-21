@@ -208,9 +208,12 @@ impl CPU {
         //     println!()
         // }
 
-        println!("{opcode_dict}; operands: {operands_str}");
+        // println!("{opcode_dict}; operands: {operands_str}");
 
         let mut remaining_cycles = opcode_dict.cycles[0] - ((self.clock - start_clock_t) as u8);
+        if (opcode >> 8) == 0xCB && code_length == 0 {
+            remaining_cycles -= 4
+        }
         if opcode & 0xFF00 == 0 { 
             if opcode == 0x00 {
                 if DEBUG {
@@ -331,7 +334,6 @@ impl CPU {
                 if DEBUG {
                     println!("> EI");
                 }
-                // self.master_interrupt_enable = true; // TODO: should be done after the next cycle, not immediately
                 self.enable_interrupts_next_instr = true;
             } else if opcode == 0x76 {
                 if DEBUG {
@@ -876,6 +878,7 @@ impl CPU {
         sp = sp.wrapping_sub(1);
         self.write_double(&DoubleDataLoc::SP, sp);
         memory.write(sp, (value & 0xFF) as u8);
+        // println!("PUSH: {value}, SP: {self.registers.SP}");
 
     }
 

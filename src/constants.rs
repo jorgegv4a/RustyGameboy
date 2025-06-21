@@ -21,18 +21,18 @@ pub const LCDC_WINDOW_TILE_MAP_BIT: u8 = 6;
 pub const LCDC_PPU_ENABLE_BIT: u8 = 7;
 
 pub const LCDC_ADDR: u16 = 0xFF40;
-pub const SCX_ADDR: u16 = 0xFF43;
+pub const STAT_ADDR: u16 = 0xFF41;
 pub const SCY_ADDR: u16 = 0xFF42;
-pub const WX_ADDR: u16 = 0xFF4B;
-pub const WY_ADDR: u16 = 0xFF4A;
-
+pub const SCX_ADDR: u16 = 0xFF43;
+pub const LCDY_ADDR: u16 = 0xFF44;
+pub const LYC_ADDR: u16 = 0xFF45;
 pub const BGP_ADDR: u16 = 0xFF47;
 pub const OBP0_ADDR: u16 = 0xFF48;
 pub const OBP1_ADDR: u16 = 0xFF49;
+pub const WY_ADDR: u16 = 0xFF4A;
+pub const WX_ADDR: u16 = 0xFF4B;
 
-pub const LCDY_ADDR: u16 = 0xFF44;
-pub const STAT_ADDR: u16 = 0xFF41;
-pub const LYC_ADDR: u16 = 0xFF45;
+
 
 pub const SB_ADDR: u16 = 0xFF01;
 pub const SC_ADDR: u16 = 0xFF02;
